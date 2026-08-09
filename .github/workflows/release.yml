@@ -1,0 +1,35 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Package release assets
+        run: |
+          mkdir release-assets
+          (cd dist && zip -r "../release-assets/dc34-badgebloom-pages-${GITHUB_REF_NAME}.zip" .)
+          cp firmware/dc34-lightqr-firmware.patch release-assets/
+          (cd release-assets && sha256sum * > "dc34-badgebloom-${GITHUB_REF_NAME}-SHA256SUMS.txt")
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: DC34 BadgeBloom ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: release-assets/*

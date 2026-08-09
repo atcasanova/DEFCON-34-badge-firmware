@@ -2,7 +2,7 @@
 
 Design a native DEF CON 34 badge light phenotype in the browser, turn it into a compact QR code, and apply it through the badge's rear camera.
 
-**Live app:** https://atcasanova.github.io/dc34-badgebloom/
+**Live app:** https://atcasanova.github.io/DEFCON-34-badge-firmware/
 
 BadgeBloom is unofficial, completely client-side, and built for the open DC34 badge platform. Nothing is uploaded: the editor, animation preview, Base45 encoder, CRC implementation, and QR renderer all run locally in your browser.
 
@@ -34,7 +34,7 @@ The QR is intentionally unauthenticated. CRC detects scan corruption, not malici
 
 ## Use
 
-1. Open the [live editor](https://atcasanova.github.io/dc34-badgebloom/).
+1. Open the [live editor](https://atcasanova.github.io/DEFCON-34-badge-firmware/).
 2. Design a pattern or choose a preset.
 3. On a badge running the companion custom firmware, press the middle button from the idle screen.
 4. Point the rear camera at the generated QR.
@@ -68,7 +68,16 @@ uri:    dc34light://FS8DL6V50SK0PFWZ/U%DG EW+3
 
 ## Firmware and flashing
 
-The `v1.0.0` release includes `dc34-lightqr-firmware.patch`, based on the official `bunnie/dc34-vault` source. It adds the QR decoder, exact phenotype rendering, PDDB persistence, and boot restoration.
+The `v1.0.0` release includes `dc34-lightqr-firmware.patch`, based on the official `bunnie/dc34-vault` source. It adds the QR decoder, exact phenotype rendering, PDDB persistence, and boot restoration. The patch was produced and apply-checked against upstream commit [`7954e620`](https://github.com/bunnie/dc34-vault/commit/7954e6200df67580795b12602e1a7235ed434ca6).
+
+Apply the patch from a clean checkout of the official vault source:
+
+```bash
+git clone https://github.com/bunnie/dc34-vault.git
+cd dc34-vault
+git checkout 7954e6200df67580795b12602e1a7235ed434ca6
+git apply ../dc34-lightqr-firmware.patch
+```
 
 Build it using the official sibling layout (`dc34-api`, `dc34-console`, `dc34-vault`, and `xous-core`) and the official Xous toolkit. Flashing requires `loader.uf2`, `xous.uf2`, and `swap.uf2`; follow the official update procedure and press a badge button after copying to commit the update.
 
@@ -77,5 +86,7 @@ No prebuilt UF2 is included because the firmware could not be compiled in the au
 ## Project status
 
 This is an independent community project, not affiliated with or endorsed by DEF CON, Baochip, or the upstream badge authors. Hardware behavior is based on the public DC34 source and documentation.
+
+Upstream references: [official DC34 badge guide](https://defcon.org/34b/), [vault firmware](https://github.com/bunnie/dc34-vault), [LED console](https://github.com/bunnie/dc34-console), and [shared badge API](https://github.com/bunnie/dc34-api).
 
 Released under the [MIT License](./LICENSE).
