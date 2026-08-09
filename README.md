@@ -201,6 +201,17 @@ Restart Windows if requested, open the new Ubuntu terminal, and follow the Linux
 
 ## Flashing on Windows, or: the irreversible part with drive letters
 
+For the one-command route, put the badge in **Update mode**, then run the included PowerShell flasher from the repository. It checks its built-in dependencies, accepts only a volume named `BAOCHIP`, prefers a local `firmware-build` directory, otherwise downloads the latest release, verifies every SHA-256 and UF2 family ID, copies all three images, and requests a safe eject:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\create.ps1
+```
+
+Use `-Source C:\path\to\firmware-build` for an explicit artifact directory or `-Drive E:` if more than one badge is connected. The filename is `create.ps1` because naming things remained the hardest part of the bar-based AI SLOP process.
+
+Manual route:
+
 1. Download and extract the firmware ZIP from the latest release. Do not copy the ZIP itself.
 2. Disconnect the badge core. Hold **any badge button** while connecting it with a data-capable USB cable.
 3. Confirm the badge screen says **Update mode**. Windows should mount it as a removable drive.
@@ -216,6 +227,17 @@ Get-Content .\SHA256SUMS.txt
 ```
 
 ## Flashing on Linux, or: `sync` is not decorative
+
+For the one-command route, put the badge in **Update mode**, then run:
+
+```bash
+chmod +x flash.sh
+./flash.sh
+```
+
+`flash.sh` installs missing dependencies through `apt`, `dnf`, `yum`, `pacman`, `zypper`, or `apk`; requires the exact `BAOCHIP` volume label; downloads and verifies the latest release when no local `firmware-build` exists; copies the matched UF2 set; calls `sync`; and safely unmounts it. Use `--source /path/to/firmware-build`, `--mount /media/you/BAOCHIP`, or `--keep-mounted` when needed. It refuses missing and ambiguous devices rather than choosing a random disk with main-character energy.
+
+Manual route:
 
 1. Download and extract the firmware ZIP.
 2. Disconnect the badge core. Hold **any badge button** while reconnecting it over a data-capable USB cable.
