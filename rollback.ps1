@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param()
+param(
+    [Parameter()]
+    [Alias('Source')]
+    [string]$ZipFile
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -49,13 +53,22 @@ try {
     }
 
     New-Item -ItemType Directory -Path $TemporaryDirectory | Out-Null
-    $Archive = Join-Path $TemporaryDirectory 'latest.zip'
+    if ([string]::IsNullOrWhiteSpace($ZipFile)) {
+        $Archive = Join-Path $TemporaryDirectory 'latest.zip'
 
-    [Net.ServicePointManager]::SecurityProtocol =
-        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-    Write-Host "Downloading official DEF CON 34 firmware from $FirmwareUrl ..."
-    Invoke-WebRequest -UseBasicParsing -Uri $FirmwareUrl -OutFile $Archive
+        Write-Host "Downloading official DEF CON 34 firmware from $FirmwareUrl ..."
+        Invoke-WebRequest -UseBasicParsing -Uri $FirmwareUrl -OutFile $Archive
+    }
+    else {
+        if (-not (Test-Path -LiteralPath $ZipFile -PathType Leaf)) {
+            throw "Local firmware archive not found: $ZipFile"
+        }
+        $Archive = (Resolve-Path -LiteralPath $ZipFile).Path
+        Write-Host "Using local firmware archive: $Archive"
+    }
 
     $ArchiveHash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
     Write-Host "latest.zip SHA-256: $ArchiveHash"
