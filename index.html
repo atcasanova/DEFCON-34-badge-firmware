@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0e0b" />
+    <meta name="description" content="Design a DEF CON 34 badge light pattern and transfer it through the badge camera." />
+    <title>DC34 BadgeBloom</title>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="wordmark" href="#" aria-label="DC34 BadgeBloom home">
+        <span class="mark">34</span>
+        <span>BADGE<br />BLOOM</span>
+      </a>
+      <div class="status"><span></span> camera-native transfer</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">BADGEBLOOM / UNOFFICIAL DC34 TOOL / PROTOCOL 01</p>
+        <h1>Make the badge<br /><em>move in color.</em></h1>
+        <p class="lede">Shape the native light-gene engine, then scan the generated QR with the camera on your custom-firmware DC34 badge.</p>
+      </section>
+
+      <section class="workspace">
+        <div class="preview-column">
+          <div class="panel preview-panel">
+            <div class="panel-kicker"><span>LIVE PHENOTYPE</span><span id="fpsLabel">SIM 35MS</span></div>
+            <div class="badge-stage" aria-label="Animated approximation of the badge light pattern">
+              <div class="orbit"></div>
+              <div class="badge-core">
+                <span class="eye eye-left"></span>
+                <span class="eye eye-right"></span>
+                <span class="core-label">DEF<br />CON<br /><b>34</b></span>
+              </div>
+              <div id="ledRing" class="led-ring" aria-hidden="true"></div>
+            </div>
+            <p class="preview-note">Preview approximates the badge's 8 body LEDs and 2 eyes. Final brightness is hardware-limited to protect the batteries.</p>
+          </div>
+
+          <div class="presets" aria-label="Pattern presets">
+            <button type="button" data-preset="tide">Neon tide</button>
+            <button type="button" data-preset="ember">Ember chase</button>
+            <button type="button" data-preset="violet">Ultraviolet</button>
+            <button type="button" id="randomize">Randomize</button>
+          </div>
+        </div>
+
+        <form id="patternForm" class="panel controls-panel">
+          <div class="panel-kicker"><span>GENE CONTROLS</span><span>09 BYTES</span></div>
+
+          <fieldset>
+            <legend>Palette</legend>
+            <div class="color-grid">
+              <label class="color-field">
+                <span>Start hue</span>
+                <input id="colorStart" name="colorStart" type="color" value="#33ff99" />
+              </label>
+              <label class="color-field">
+                <span>End hue</span>
+                <input id="colorEnd" name="colorEnd" type="color" value="#5267ff" />
+              </label>
+            </div>
+            <label class="range-field">
+              <span><b>Saturation</b><output for="saturation"></output></span>
+              <input id="saturation" name="saturation" type="range" min="0" max="255" value="230" />
+            </label>
+            <p class="hint">The native engine supports one continuous hue interval and one shared saturation. Hue endpoints are ordered automatically.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Motion</legend>
+            <label class="range-field">
+              <span><b>Wave count</b><output for="waves"></output></span>
+              <input id="waves" name="waves" type="range" min="0" max="6" value="3" />
+            </label>
+            <label class="range-field">
+              <span><b>Pulse speed</b><output for="speed"></output></span>
+              <input id="speed" name="speed" type="range" min="0" max="255" value="150" />
+            </label>
+            <label class="range-field">
+              <span><b>Hue drift</b><output for="hueRate"></output></span>
+              <input id="hueRate" name="hueRate" type="range" min="0" max="15" value="5" />
+            </label>
+            <div class="toggle-grid">
+              <label class="toggle"><input id="pulseReverse" type="checkbox" /><span></span>Reverse pulse</label>
+              <label class="toggle"><input id="hueReverse" type="checkbox" checked /><span></span>Reverse hues</label>
+              <label class="toggle"><input id="chaser" type="checkbox" /><span></span>White chaser</label>
+              <label class="toggle"><input id="gamma" type="checkbox" checked /><span></span>Deep contrast</label>
+            </div>
+          </fieldset>
+        </form>
+
+        <section class="panel transfer-panel">
+          <div class="panel-kicker"><span>CAMERA TRANSFER</span><span>CRC-16</span></div>
+          <div class="qr-shell"><canvas id="qrCanvas" width="280" height="280" aria-label="QR code containing the current light pattern"></canvas></div>
+          <h2>Scan to apply</h2>
+          <ol>
+            <li>On the custom firmware's idle screen, press the middle camera button.</li>
+            <li>Point the rear camera at this code and hold steady.</li>
+            <li>Preview the result, then choose <strong>Keep</strong> or <strong>Revert</strong> on the badge.</li>
+          </ol>
+          <div class="button-row">
+            <button id="downloadQr" class="primary" type="button">Download QR</button>
+            <button id="copyPayload" type="button">Copy payload</button>
+          </div>
+          <details>
+            <summary>Inspect encoded record</summary>
+            <code id="payloadText"></code>
+            <dl id="byteReadout"></dl>
+          </details>
+          <p id="transferStatus" class="transfer-status" role="status">QR is ready.</p>
+        </section>
+      </section>
+    </main>
+
+    <footer>
+      <span>DC34 BADGEBLOOM</span>
+      <span>LOCAL-FIRST / NO UPLOAD / UNAUTHENTICATED QR</span>
+    </footer>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

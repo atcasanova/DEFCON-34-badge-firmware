@@ -1,0 +1,17 @@
+{
+  "name": "dc34-badgebloom",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node tests/protocol.test.js"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "vite": "8.2.1"
+  }
+}
