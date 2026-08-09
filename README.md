@@ -96,7 +96,21 @@ If the camera misses something, leave it aimed at the carousel for another lap. 
 
 The QR formats are intentionally unauthenticated. Their checksums detect corruption, not hostile input. Scan only data you intend to preview. Las Vegas already contains enough untrusted input.
 
-## Developing the web-flavored AI SLOP
+## Download the first actually flashable release
+
+Starting with **v1.2.0**, releases contain a complete, developer-signed firmware set instead of making you assemble the Rust cinematic universe yourself:
+
+- `loader.uf2`
+- `xous.uf2`
+- `swap.uf2`
+- `dc34-badgebloom-firmware-v1.2.0.zip` containing all three files, a build manifest, and firmware checksums
+- `dc34-badgebloom-firmware.patch` for people who regard prebuilt binaries with healthy suspicion
+
+Download all three UF2 files from the [latest release](https://github.com/atcasanova/DEFCON-34-badge-firmware/releases/latest), or download and extract the firmware ZIP. Keep the three files from the same release together; mixing versions is exciting in the wrong way.
+
+The artifacts are compiled with the public Xous developer key. They were successfully built for the real `riscv32imac-unknown-xous-elf` target and checked as UF2 images for Baochip family `0xA7D76373`. Camera timing and button behavior still deserve validation on physical badge hardware before this AI SLOP is mistaken for avionics.
+
+## Developing and deploying the web-flavored AI SLOP
 
 Node.js 22 or newer is required:
 
@@ -114,18 +128,40 @@ npm run build
 
 The build also synchronizes the compiled bundle to the repository root so both GitHub Pages publishing modes serve the same files. Tests cover Base45, CRC-16, CRC-32, light records, wallpaper records, corruption rejection, out-of-order assembly, duplicates, and the official wallpaper bit/word ordering.
 
+Pushing `main` deploys `dist/` through the GitHub Pages workflow. To deploy it somewhere else, upload the contents of `dist/` to any static host; it needs no server-side code, environment variables, or database.
+
 ## Building the firmware-flavored AI SLOP
 
-The `v1.1.0` release includes `dc34-badgebloom-firmware.patch`, produced and apply-checked against official vault commit [`7954e620`](https://github.com/bunnie/dc34-vault/commit/7954e6200df67580795b12602e1a7235ed434ca6).
+The reproducible build script clones and pins the exact sources, installs Rust 1.97.1, installs Xous's custom target, applies the BadgeBloom patch, compiles both DC34 applications, packs the operating system, and signs it with the public developer key.
+
+The source set is intentionally pinned:
+
+| Component | Commit |
+|---|---|
+| `dc34-api` | [`617f0f3`](https://github.com/bunnie/dc34-api/commit/617f0f3dff3cea1e9421d766b19664f5bec9a54b) |
+| `dc34-console` | [`bf64e03`](https://github.com/bunnie/dc34-console/commit/bf64e03f019532cca5055fcdbe51977d572e3630) |
+| `dc34-vault` | [`7954e62`](https://github.com/bunnie/dc34-vault/commit/7954e6200df67580795b12602e1a7235ed434ca6) |
+| `xous-core` | [`5d5bbbfa`](https://github.com/betrusted-io/xous-core/commit/5d5bbbfa95c0dcef26fe1fe9b496b7f6f31d191b) |
+| Rust and Xous sysroot | `1.97.1` |
+
+That Xous pin matters. The DC34 Cargo manifests retain an older fallback revision, but the late-July DC34 sources call watchdog, RTC, display, and keystore APIs from the August Xous tree. The official sibling checkout overrides the fallback dependencies; building against the old revision produces a festival of missing-method errors.
+
+### Linux build
+
+On Ubuntu or Debian:
 
 ```bash
-git clone https://github.com/bunnie/dc34-vault.git
-cd dc34-vault
-git checkout 7954e6200df67580795b12602e1a7235ed434ca6
-git apply ../dc34-badgebloom-firmware.patch
+sudo apt update
+sudo apt install -y build-essential curl file git libssl-dev pkg-config zip
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+. "$HOME/.cargo/env"
+
+git clone https://github.com/atcasanova/DEFCON-34-badge-firmware.git
+cd DEFCON-34-badge-firmware
+./scripts/build-firmware.sh ./firmware-build
 ```
 
-Use the official sibling layout:
+The finished files are in `firmware-build/`. The script uses a temporary sibling workspace internally:
 
 ```text
 workspace/
@@ -135,17 +171,55 @@ workspace/
 └── xous-core/
 ```
 
-Build with the official Xous toolkit. Flashing requires `loader.uf2`, `xous.uf2`, and `swap.uf2`. No prebuilt UF2 is provided by this project: the browser implementation and protocol tests can be automated here, but camera timing and final firmware behavior deserve validation on actual hardware before anyone pretends this is aerospace.
+Set `BADGEBLOOM_BUILD_ROOT` to an empty directory if you want to preserve that workspace for debugging. Otherwise it is safely removed after the build.
 
-## Flashing, or: the irreversible part
+### Windows build
 
-1. Hold any badge button while pressing reset or power cycling.
-2. Confirm the screen says **Update mode** and connect USB.
-3. Copy `loader.uf2`, `xous.uf2`, and `swap.uf2` to the mass-storage device.
-4. On Linux, unmount it or run `sync`.
-5. Press any badge button to commit the files.
+The supported Windows route is WSL2, because Xous's build and packaging scripts are Unix-oriented. Open PowerShell as Administrator:
 
-Forgetting `sync` or the final button press can leave the update incomplete. If it aborts, enter Update mode and try again after reconsidering the life choices that led here.
+```powershell
+wsl --install -d Ubuntu
+```
+
+Restart Windows if requested, open the new Ubuntu terminal, and follow the Linux build commands above. From Explorer, WSL files are available below `\\wsl$\Ubuntu\`; you can also copy the resulting `firmware-build` directory into your Windows Downloads folder.
+
+## Flashing on Windows, or: the irreversible part with drive letters
+
+1. Download and extract `dc34-badgebloom-firmware-v1.2.0.zip` from the release. Do not copy the ZIP itself.
+2. Disconnect the badge core. Hold **any badge button** while connecting it with a data-capable USB cable.
+3. Confirm the badge screen says **Update mode**. Windows should mount it as a removable drive.
+4. Copy `loader.uf2`, `xous.uf2`, and `swap.uf2` to the root of that drive. Copy all three from the same release.
+5. Wait for every copy to finish, then use **Eject** or **Safely Remove Hardware** on the removable drive.
+6. While the badge is still powered, press any badge button. This final press commits any partially buffered sector and boots the new firmware.
+
+Optional PowerShell checksum inspection:
+
+```powershell
+Get-FileHash .\loader.uf2, .\xous.uf2, .\swap.uf2 -Algorithm SHA256
+Get-Content .\SHA256SUMS.txt
+```
+
+## Flashing on Linux, or: `sync` is not decorative
+
+1. Download and extract the firmware ZIP.
+2. Disconnect the badge core. Hold **any badge button** while reconnecting it over a data-capable USB cable.
+3. Confirm **Update mode** appears, then identify the newly mounted removable drive:
+
+   ```bash
+   lsblk -o NAME,LABEL,SIZE,MOUNTPOINTS
+   ```
+
+4. Using the actual mount point reported on your machine, copy all three matched files. For example:
+
+   ```bash
+   cp loader.uf2 xous.uf2 swap.uf2 /media/your-user/BAOCHIP/
+   sync
+   ```
+
+5. Eject it in your file manager, or unmount the correct partition with `udisksctl unmount -b /dev/sdX1`, replacing `/dev/sdX1` with the device shown by `lsblk`.
+6. While the badge remains powered, press any badge button to finalize the update and boot.
+
+Forgetting `sync`/Eject or the final button press can leave the last sector incomplete. If an update aborts, re-enter Update mode and flash the complete matched set again. Do not guess a device path, and do not copy the files onto an ordinary disk that merely happened to be nearby.
 
 ## Serious acknowledgements hiding below the jokes
 

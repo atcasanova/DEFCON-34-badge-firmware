@@ -1,8 +1,31 @@
 diff --git a/src/config.rs b/src/config.rs
-index 9039fcb..75bc91b 100644
+index 9039fcb..6813d3b 100644
 --- a/src/config.rs
 +++ b/src/config.rs
-@@ -375,6 +375,21 @@ impl GlobalConfig {
+@@ -259,8 +259,9 @@ impl GlobalConfig {
+         // handles None case, as well as Some(previous_mode) not the same as Some(current_mode)
+         if self.previous_mode != Some(current_mode) {
+             let (enable, duration_sec) = match current_mode {
+-                VaultMode::About => (true, SHORT_TIMEOUT),
+-                VaultMode::ConfirmGene => (true, MEDIUM_TIMEOUT),
++                VaultMode::About => (true, SHORT_TIMEOUT),
++                VaultMode::ConfirmGene => (true, MEDIUM_TIMEOUT),
++                VaultMode::ConfirmWallpaper => (true, MEDIUM_TIMEOUT),
+                 VaultMode::FactoryTest => (false, 0),
+                 VaultMode::StandAloneTest => (false, 0),
+                 VaultMode::DefconHelp => (true, SHORT_TIMEOUT),
+@@ -271,7 +272,9 @@ impl GlobalConfig {
+                 VaultMode::Totp => (true, MEDIUM_TIMEOUT),
+                 VaultMode::GeneScan => (true, LONG_TIMEOUT),
+                 VaultMode::ResponseGene { quantum: _ } => (true, LONG_TIMEOUT),
+-                VaultMode::ShowKey { quantum: _ } => (true, LONG_TIMEOUT),
++                VaultMode::ShowKey { quantum: _ } => (true, LONG_TIMEOUT),
++                VaultMode::ShowRepo { quantum: _ } => (true, LONG_TIMEOUT),
++                VaultMode::Wallpaper => (true, MEDIUM_TIMEOUT),
+                 VaultMode::TokenTour => (true, MEDIUM_TIMEOUT),
+                 VaultMode::Tour => (true, MEDIUM_TIMEOUT),
+             };
+@@ -375,6 +378,21 @@ impl GlobalConfig {
  
      pub fn gene(&self) -> Option<Diploid> { self.gene_cache }
  
