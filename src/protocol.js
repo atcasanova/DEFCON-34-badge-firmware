@@ -1,4 +1,6 @@
-export const URI_PREFIX = "dc34light://";
+// Uppercase keeps the complete payload inside QR's compact alphanumeric mode.
+// The decoder remains case-insensitive for compatibility with already-generated codes.
+export const URI_PREFIX = "DC34LIGHT://";
 export const BASE45_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
 export const FIELD_NAMES = [
   "wave count",
@@ -114,7 +116,7 @@ export function hexToHue(hex) {
 }
 
 export function hexToRgb(hex) {
-  if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error("Eye colors must use six-digit hex values");
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error("Colors must use six-digit hex values");
   const value = Number.parseInt(hex.slice(1), 16);
   return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
 }
@@ -200,7 +202,9 @@ export function encodeLightQr(settings) {
 }
 
 export function decodeLightQr(uri) {
-  if (!uri.startsWith(URI_PREFIX)) throw new Error("Not a DC34 Light Studio URI");
+  if (uri.slice(0, URI_PREFIX.length).toUpperCase() !== URI_PREFIX) {
+    throw new Error("Not a DC34 Light Studio URI");
+  }
   const record = decodeBase45(uri.slice(URI_PREFIX.length));
   if (record.length !== LEGACY_RECORD_BYTES && record.length !== RECORD_BYTES) {
     throw new Error("Invalid record length");

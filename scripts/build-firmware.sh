@@ -13,15 +13,35 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${1:-${REPO_ROOT}/firmware-build}"
 VAULT_PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-firmware.patch"
 CONSOLE_PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-console.patch"
+VAULT_FUNCTIONAL_PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-vault-functional.patch"
+CONSOLE_FUNCTIONAL_PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-console-functional.patch"
+DIAGNOSTIC_LOADER_PATCH_FILE="${REPO_ROOT}/firmware/dc34-diagnostic-loader.patch"
+XOUS_SWAP_PATCH_FILE="${REPO_ROOT}/firmware/xous-inis-nocopy-loader.patch"
+DIAGNOSTIC_LOADER="${BADGEBLOOM_DIAGNOSTIC_LOADER:-0}"
 
-for command in cargo curl file git rustc rustup sha256sum; do
+if [[ "${DIAGNOSTIC_LOADER}" != 0 && "${DIAGNOSTIC_LOADER}" != 1 ]]; then
+  echo "BADGEBLOOM_DIAGNOSTIC_LOADER must be 0 or 1" >&2
+  exit 1
+fi
+
+for command in cargo curl file git grep rustc rustup sha256sum; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     echo "Missing required command: ${command}" >&2
     exit 1
   fi
 done
 
-for patch_file in "${VAULT_PATCH_FILE}" "${CONSOLE_PATCH_FILE}"; do
+if [[ "${DIAGNOSTIC_LOADER}" == 1 && ! -f "${DIAGNOSTIC_LOADER_PATCH_FILE}" ]]; then
+  echo "Diagnostic loader patch not found: ${DIAGNOSTIC_LOADER_PATCH_FILE}" >&2
+  exit 1
+fi
+
+for patch_file in \
+  "${VAULT_PATCH_FILE}" \
+  "${CONSOLE_PATCH_FILE}" \
+  "${VAULT_FUNCTIONAL_PATCH_FILE}" \
+  "${CONSOLE_FUNCTIONAL_PATCH_FILE}" \
+  "${XOUS_SWAP_PATCH_FILE}"; do
   if [[ ! -f "${patch_file}" ]]; then
     echo "Firmware patch not found: ${patch_file}" >&2
     exit 1
@@ -73,8 +93,55 @@ clone_pin https://github.com/betrusted-io/xous-core.git "${BUILD_ROOT}/xous-core
 echo "==> Applying BadgeBloom console and vault patches"
 git -C "${BUILD_ROOT}/dc34-console" apply --check "${CONSOLE_PATCH_FILE}"
 git -C "${BUILD_ROOT}/dc34-console" apply "${CONSOLE_PATCH_FILE}"
+git -C "${BUILD_ROOT}/dc34-console" apply --check "${CONSOLE_FUNCTIONAL_PATCH_FILE}"
+git -C "${BUILD_ROOT}/dc34-console" apply "${CONSOLE_FUNCTIONAL_PATCH_FILE}"
 git -C "${BUILD_ROOT}/dc34-vault" apply --check "${VAULT_PATCH_FILE}"
 git -C "${BUILD_ROOT}/dc34-vault" apply "${VAULT_PATCH_FILE}"
+git -C "${BUILD_ROOT}/dc34-vault" apply --check "${VAULT_FUNCTIONAL_PATCH_FILE}"
+git -C "${BUILD_ROOT}/dc34-vault" apply "${VAULT_FUNCTIONAL_PATCH_FILE}"
+git -C "${BUILD_ROOT}/xous-core" apply --check "${XOUS_SWAP_PATCH_FILE}"
+git -C "${BUILD_ROOT}/xous-core" apply "${XOUS_SWAP_PATCH_FILE}"
+
+if [[ "${DIAGNOSTIC_LOADER}" == 1 ]]; then
+  echo "==> Applying on-screen early-boot diagnostics"
+  git -C "${BUILD_ROOT}/xous-core" apply --check "${DIAGNOSTIC_LOADER_PATCH_FILE}"
+  git -C "${BUILD_ROOT}/xous-core" apply "${DIAGNOSTIC_LOADER_PATCH_FILE}"
+fi
+
+echo "==> Verifying BadgeBloom BIO control-state layout"
+LIGHTGENES_C="${BUILD_ROOT}/dc34-console/src/bio/lightgenes/main.c"
+LIGHTGENES_RS="${BUILD_ROOT}/dc34-console/src/bio/lightgenes/lightgenes.rs"
+readonly LIGHTGENES_C LIGHTGENES_RS
+for symbol in \
+  eye_mode \
+  custom_eye_left_r custom_eye_left_g custom_eye_left_b \
+  custom_eye_right_r custom_eye_right_g custom_eye_right_b \
+  eye_rate_25ms eye_brightness; do
+  grep -Fq "static uint32_t ${symbol}" "${LIGHTGENES_C}" || {
+    echo "BIO control is not word-aligned in main.c: ${symbol}" >&2
+    exit 1
+  }
+  grep -Fq "rodata: ${symbol} (4 entries, 1 words)" "${LIGHTGENES_RS}" || {
+    echo "Generated BIO control layout is unsafe: ${symbol}" >&2
+    exit 1
+  }
+done
+grep -Fq "unaligned .set aliases" "${BUILD_ROOT}/dc34-console/src/bio/clang2rustasm.py" || {
+  echo "BIO converter is missing the unaligned-alias safety check" >&2
+  exit 1
+}
+grep -Fq "*mrna as u32 | 0x4000_0000" "${BUILD_ROOT}/dc34-console/src/bio/lightgenes/mod.rs" || {
+  echo "Forced ring pattern is missing the BIO write tag" >&2
+  exit 1
+}
+grep -Fq "self.express_phenotype(phenotype)" "${BUILD_ROOT}/dc34-console/src/bio/lightgenes/mod.rs" || {
+  echo "Force is not routed through the stock phenotype sender" >&2
+  exit 1
+}
+if grep -Fq "animation_speed_percent" "${LIGHTGENES_C}"; then
+  echo "Retired runtime speed multiplier is still present in the BIO engine" >&2
+  exit 1
+fi
 
 echo "==> Installing the matching Xous target and build tools"
 (
@@ -135,7 +202,14 @@ done
   echo "dc34-vault: ${DC34_VAULT_COMMIT}"
   echo "xous-core: ${XOUS_COMMIT}"
   echo "Console patch SHA-256: $(sha256sum "${CONSOLE_PATCH_FILE}" | cut -d' ' -f1)"
+  echo "Console functional patch SHA-256: $(sha256sum "${CONSOLE_FUNCTIONAL_PATCH_FILE}" | cut -d' ' -f1)"
   echo "Vault patch SHA-256: $(sha256sum "${VAULT_PATCH_FILE}" | cut -d' ' -f1)"
+  echo "Vault functional patch SHA-256: $(sha256sum "${VAULT_FUNCTIONAL_PATCH_FILE}" | cut -d' ' -f1)"
+  echo "Xous IniS NOCOPY patch SHA-256: $(sha256sum "${XOUS_SWAP_PATCH_FILE}" | cut -d' ' -f1)"
+  echo "Diagnostic loader: ${DIAGNOSTIC_LOADER}"
+  if [[ "${DIAGNOSTIC_LOADER}" == 1 ]]; then
+    echo "Diagnostic loader patch SHA-256: $(sha256sum "${DIAGNOSTIC_LOADER_PATCH_FILE}" | cut -d' ' -f1)"
+  fi
   echo "Signing: public Xous developer key"
 } > "${OUTPUT_DIR}/BUILD-MANIFEST.txt"
 

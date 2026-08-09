@@ -2,63 +2,78 @@
 
 Read this before flashing anything.
 
-The physical badge is currently healthy and running the official stock firmware. It displays **DEV MODE**, which is expected after developer-signed firmware has ever been installed. Do not spend time trying to clear that label: developer mode is a one-way device state, and reinstalling stock firmware does not restore the erased factory/provisioned secrets.
+The physical badge has permanently entered **DEV MODE**. This is expected after installing developer-signed firmware: the transition erases the provisioned `k0` light-exchange secret. Reinstalling stock firmware does not restore that secret. The stock exchange screens can be restored, but authenticated exchange with factory badges cannot be recovered.
 
-The immediate task is to fix BadgeBloom's custom firmware so it boots on real hardware. The published **v1.3.1 custom firmware is known bad on this badge**: it stops at the boot logo with the progress bar visually around 50%. Do not flash v1.3.1 again except as part of a deliberate diagnostic experiment with the official rollback files ready.
+The published **v1.3.1 firmware is known bad** on this badge: it stops at the boot logo near 50%. A corrected loader has already reached the application on real hardware. The 2026-08-09 ring-fix candidate was flashed and published at the owner's request without waiting for a full physical acceptance test.
 
-## Project in one paragraph
+## Current intended behavior
 
-[DC34 BadgeBloom](https://github.com/atcasanova/DEFCON-34-badge-firmware) is an independent DEF CON 34 badge firmware modification plus a 100% client-side JavaScript configurator hosted on [GitHub Pages](https://atcasanova.github.io/DEFCON-34-badge-firmware/). The web app lets a user design the eight perimeter LEDs and two eye LEDs, select eye behavior and animation speed, convert monochrome wallpapers, and send everything to the badge camera through checksummed QR records. Wallpapers use a slow eight-frame QR carousel so the camera does not have to win an FPS race.
+BadgeBloom is now only a light-pattern configurator. The browser editor defines the eight perimeter LEDs, two eye LEDs, eye behavior, and the pattern's encoded pulse speed, then sends one checksummed `DC34LIGHT://` QR to the badge. The uppercase prefix is intentionally QR-alphanumeric and the decoder remains case-insensitive.
 
-The intended physical controls are:
+Custom wallpaper transfer was removed after physical testing showed that the badge camera could not reliably read its QR carousel. The badge keeps its normal/default image. Runtime speed adjustment was also removed from the rocker; the speed slider remains in the webapp because it is part of the pattern encoded in the QR.
 
 | Control | Intended behavior |
 |---|---|
-| Left front button | Open the camera and scan a BadgeBloom light or wallpaper QR |
-| Middle front button | Show the saved monochrome wallpaper |
-| Right front button | Show a QR linking to this repository |
-| Side rocker up/down | Increase/decrease animation speed from 0.25x to 2x |
-| Side rocker press | Reset animation speed to 1x |
+| Left / Middle | Open the scanner for a BadgeBloom light QR |
+| Right | Show the stock gene-exchange nonce QR |
+| Rocker up/down | No BadgeBloom speed adjustment |
+| Hold rocker for about 1.3 seconds | Open the idle menu with **Power Off** first |
 
-The complete feature description and QR formats are in [README.md](./README.md). The web app is not the current blocker; its JavaScript protocol tests and production build pass. The blocker is booting the custom Xous firmware on the real badge.
+## Current implementation state
 
-## How we got here
+- The Xous loader `IniS`/`NOCOPY` boot bug is fixed.
+- The badge-side wallpaper, repository-QR, and wallpaper persistence flows are removed.
+- The permanent `DEV MODE` overlay is removed; developer mode remains a device state, not an always-on application label.
+- Both the previously proven left-button path and the stock middle camera button open the light scanner; right retains the stock nonce QR.
+- A long rocker hold opens the idle menu; the same physical hold is latched so it cannot immediately activate the selected item.
+- **Power Off** is the first idle-menu item.
+- Rocker up/down no longer changes animation speed.
+- The QR's encoded speed remains active and is kept in the webapp.
+- The ring force command now uses the same complete FIFO sequence as the stock `SetGene` path, with the required BIO write bit and clear boundaries.
+- Custom-eye startup values fail dark instead of defaulting to white at full brightness.
+- Keep/Revert closes its menu state immediately, preventing a fast middle-button camera press from being routed back to the stale confirmation menu.
+- The webapp exposes stock-follow, off, steady, human blink, alternating wink, and breathe eye behaviors under **Eye animation**.
+- Both firmware components and the production webapp build successfully; the matched UF2 set was flashed and byte-verified on the BAOCHIP volume.
 
-1. The project began as a browser editor for the badge's perimeter light phenotype.
-2. The physical preview was corrected from a circle to the badge's eight-LED diamond layout, with the two eye LEDs handled separately.
-3. Monochrome image conversion and an eight-frame, camera-paced wallpaper QR protocol were added.
-4. The badge-side vault patch added QR decoding, previews, Keep/Revert, PDDB persistence, wallpaper display, repository QR display, and button/rocker behavior.
-5. A second firmware patch modified `dc34-console` and its generated BIO light engine to restore independent eye control and add runtime animation-speed scaling.
-6. A pinned build pipeline successfully compiled and developer-signed `loader.uf2`, `xous.uf2`, and `swap.uf2`. CI checked hashes and UF2 structure, but there had been no physical boot test.
-7. Those artifacts were published as v1.3.0 and rebuilt unchanged for v1.3.1. The v1.3.1 source change itself only added cross-platform flashing scripts; its firmware patches are the same as v1.3.0.
-8. The first real v1.3.1 flash completed, but the badge stopped at its logo with the progress bar near 50%.
-9. The same badge was then flashed with the official `latest.zip` set. That firmware booted and works normally, displaying DEV MODE.
+## Boot fix confirmed on hardware (2026-08-09)
 
-That final experiment is decisive: the badge hardware, boot1/update mode, flash storage, USB cable, and basic update procedure all work. The problem is in the custom build/artifact set.
+On-screen loader instrumentation first stopped at `D1B I16 P13 TS`, locating the failure inside phase 1 while loading PID 13 (`dc34-vault`) as an `IniS` swap process. Detailed instrumentation then stopped at `D3R I88 P13 TS`; the two-digit page display is modulo 100, so this meant source page **288**.
 
-## Repository state
+The custom vault's final `NOCOPY` sections describe zero-filled memory through source-relative offset `0x120210`, while the encrypted data/MAC boundary is `0x120000` (288 data pages, numbered 0-287). The pinned loader incorrectly advanced the source pointer and attempted to decrypt every `NOCOPY` page, even though those bytes do not exist in the ELF payload. It therefore attempted to decrypt page 288, which is the MAC table.
 
-- Default branch: `main`
-- Known-bad release tag: `v1.3.1` at commit `fc435a6666d75cc39b7c76d81372df0f8df5740f`
-- `v1.3.0` at `1adbcf2` introduced the console/eye/speed patch and should be presumed bad until tested.
-- `v1.2.0` at `e8aa192` predates the console patch. It contains the vault-side QR/wallpaper work and is physically untested; it is useful as a possible binary-bisection candidate, not as a known-good release.
-- `main` also contains [rollback.ps1](./rollback.ps1), which can use an already-downloaded official ZIP and does not need TLS when invoked with `-ZipFile`.
-- Do not create a new release or move a tag until a complete candidate has booted and passed the physical test checklist below.
+All 288 encrypted pages in the candidate `swap.uf2` independently authenticated successfully with AES-GCM-SIV, ruling out a corrupt or truncated artifact. `firmware/xous-inis-nocopy-loader.patch` fixes the loader by zero-filling `NOCOPY` destinations without reading, decrypting, or advancing source data. The corrected loader reached `DEV MODE` on the physical badge.
 
-Important files:
+Physically booted loader-fix test set:
+
+```text
+loader.uf2  356352 bytes  b112d47056ec92b90b7cdfa602f7c7cac27cb3a39f1604f5f1510d3ff04e4298
+xous.uf2   6358528 bytes  86ca351eb0635eb698b36db51bc31edb03b4e3b9cf95a649261af59ba271e221
+swap.uf2   2384896 bytes  a743acab3b1203e742ebd8bc8b460f716d1413eea25ea15cd3d250a336e00c59
+```
+
+This set proves the loader fix only. It predates the final feature simplification and the ring-force fix and must not be published as the final firmware.
+
+## Ring LED fix
+
+The badge reached the application, accepted the QR, and changed only its eyes. The vault was sending the complete pattern, but `Lightgenes::force()` in the console omitted BIO bit `0x4000_0000`. Without that write bit, every forced perimeter byte was discarded. `firmware/dc34-badgebloom-console-functional.patch` adds the bit while retaining the FIFO guard.
+
+## Important files
 
 | File | Purpose |
 |---|---|
-| [firmware/dc34-badgebloom-firmware.patch](./firmware/dc34-badgebloom-firmware.patch) | `dc34-vault` QR, wallpaper, UI, persistence, button, and rocker changes |
-| [firmware/dc34-badgebloom-console.patch](./firmware/dc34-badgebloom-console.patch) | `dc34-console` eyes, BIO engine, and speed changes |
-| [scripts/build-firmware.sh](./scripts/build-firmware.sh) | Pinned clone/build/sign/package pipeline |
-| [create.ps1](./create.ps1) | Windows flasher for BadgeBloom candidate artifacts |
-| [rollback.ps1](./rollback.ps1) | Windows recovery flasher for official stock `latest.zip` |
-| [src/protocol.js](./src/protocol.js) | Light QR v1/v2 records |
-| [src/image-protocol.js](./src/image-protocol.js) | Wallpaper frame protocol |
-| [tests/protocol.test.js](./tests/protocol.test.js) | Browser protocol tests |
+| `firmware/dc34-badgebloom-firmware.patch` | Original vault QR/UI implementation |
+| `firmware/dc34-badgebloom-vault-functional.patch` | Removes wallpaper/runtime-speed UI and restores the intended controls |
+| `firmware/dc34-badgebloom-console.patch` | Original eye/BIO console implementation |
+| `firmware/dc34-badgebloom-console-functional.patch` | Fixes forced ring writes |
+| `firmware/xous-inis-nocopy-loader.patch` | Correct loader handling for zero-filled swap sections |
+| `firmware/dc34-diagnostic-loader.patch` | Optional on-screen early-boot instrumentation |
+| `scripts/build-firmware.sh` | Pinned clone/build/sign/package pipeline applying all production patches |
+| `create.ps1` | Windows flasher for a matched candidate set |
+| `rollback.ps1` | Recovery flasher for the official stock archive |
+| `src/protocol.js` | Light QR v1/v2 protocol |
+| `tests/protocol.test.js` | Light protocol tests |
 
-The build pins are:
+Pinned source set:
 
 | Component | Commit/version |
 |---|---|
@@ -68,37 +83,18 @@ The build pins are:
 | `dc34-vault` | `7954e6200df67580795b12602e1a7235ed434ca6` |
 | `xous-core` | `5d5bbbfa95c0dcef26fe1fe9b496b7f6f31d191b` |
 
-The pack command mirrors the upstream `dc34-vault` instructions:
+## Known firmware sets
+
+Known-good official stock archive, successfully flashed on this badge:
 
 ```text
-cargo +1.97.1 xtask baosec-lite \
-  ../dc34-console/target/riscv32imac-unknown-xous-elf/release/dc34-console~flash \
-  ../dc34-vault/target/riscv32imac-unknown-xous-elf/release/dc34-vault \
-  --no-timestamp --feature usb --kernel-feature debug-proc --no-verify
-```
-
-## Confirmed artifacts
-
-### Known-good official stock set
-
-Source: <https://defcon.org/34b/latest.zip>
-
-The official DEF CON URL and the upstream CI URL currently serve the same archive. This exact archive was flashed successfully on the physical badge:
-
-```text
-latest.zip
-SHA-256 17f0f4d08debe2481ef7de0a4ab5ec92cc383ab7ed8ec06dc0bf1686852105f7
-
+latest.zip  17f0f4d08debe2481ef7de0a4ab5ec92cc383ab7ed8ec06dc0bf1686852105f7
 loader.uf2  353280 bytes  916704a57f766b412c4e19016071a63e93c14b9a66cb1ca5d44196b11a0a3e00
 xous.uf2   6358528 bytes  098c2566b8e2fdd9f698c478bd4deeba0c03da26cb679014a99d3951ec044a74
 swap.uf2   2343424 bytes  54c400cb37da0a87b48cf775619564096d4b6274cfe39deaf5198b1ce0fd8870
 ```
 
-Keep this ZIP on the Windows machine throughout testing.
-
-### Known-bad BadgeBloom v1.3.1 set
-
-Source: <https://github.com/atcasanova/DEFCON-34-badge-firmware/releases/tag/v1.3.1>
+Known-bad BadgeBloom v1.3.1 set:
 
 ```text
 loader.uf2  353280 bytes  766454d380e80d147fa8f4ddcf8dcb45d798608c84e13f491caa1fe7f8bf51df
@@ -106,129 +102,58 @@ xous.uf2   6366720 bytes  3f17d5f77a99d15fc5bf718525cddb0f652e87ff836799c92fc0c1
 swap.uf2   2384896 bytes  c7f0da3e3bf109cefd0b2940184527ebc161e4a4432eabd9f2bb10033f0c444f
 ```
 
-These files are structurally valid UF2 images for family `0xA7D76373`, with coherent block counts and target ranges. That validation only proves packaging structure; it does not prove that the contained system can boot.
+Keep the official archive locally throughout physical testing.
 
-## Best current failure lead
+## Build and flash workflow
 
-The displayed 50% is produced by the Xous loader, before the BadgeBloom vault UI or LED application begins executing. The pinned loader's cold-boot sequence calls `phase_1`, then `phase_2`, then displays 100%. In `phase_1`, the bar advances from 5% to 70% while kernel arguments and resident processes are copied.
-
-The custom and official `xous.uf2` files were decoded and their XArg process tables compared:
-
-- Both have the same resident process ordering.
-- PID 2 through PID 11 have the same section sizes in stock and v1.3.1.
-- PID 11 is `bao-video`.
-- PID 12 is `dc34-console`, the first changed resident process.
-- Stock `dc34-console` payload: 368,272 bytes, entry point `0x60cb2`.
-- BadgeBloom `dc34-console` payload: 372,856 bytes, entry point `0x6256c`.
-- The runtime argument list has 16 entries after the swapped vault app is merged. Integer progress increments are four points per entry.
-- The bar is approximately 49% immediately before/around the `dc34-console` entry and 53% after it.
-
-Therefore the patched console or its interaction with the selected loader/build is the strongest current suspect. This is an inference, not proof: the user's “50%” was visual rather than an exact numeric reading, and a failure immediately after the console could look nearly identical.
-
-One obvious theory has already been checked: the generated aligned BIO light program is not over its stated size limit. In the built ELF, `BM_LIGHTGENES_BIO_END - BM_LIGHTGENES_BIO_START - 4` is `0xC8C`, below `0xF00`. Do not assume that the BIO source is correct, but do not waste the first debugging cycle merely rediscovering this size measurement.
-
-Relevant upstream loader sources:
-
-- <https://github.com/betrusted-io/xous-core/blob/5d5bbbfa95c0dcef26fe1fe9b496b7f6f31d191b/loader/src/main.rs>
-- <https://github.com/betrusted-io/xous-core/blob/5d5bbbfa95c0dcef26fe1fe9b496b7f6f31d191b/loader/src/phase1.rs>
-- <https://github.com/betrusted-io/xous-core/blob/5d5bbbfa95c0dcef26fe1fe9b496b7f6f31d191b/loader/src/phase2.rs>
-
-## Recommended diagnostic sequence
-
-Change one variable at a time and always build/flash a complete matched three-file set.
-
-1. **Preserve the recovery baseline.** Confirm `rollback.ps1 -ZipFile ...` and the official ZIP remain available locally.
-2. **Fast historical bisect, optional:** test the complete v1.2.0 artifact set. It uses the same Rust/Xous/source pins but predates `dc34-badgebloom-console.patch`. If it boots past 50%, the console patch is strongly implicated. v1.2.0 is not known-good, so treat this as a diagnostic flash and keep rollback ready.
-3. **Build an unpatched baseline** from the four pinned upstream repositories using the same pack command. Flash it. If this fails, the problem is the source/toolchain/signing/build selection rather than BadgeBloom patches; align the build with the official CI revision before proceeding.
-4. **Build vault-only:** apply `dc34-badgebloom-firmware.patch`, leave `dc34-console` untouched, then build and flash. This tests QR/wallpaper/UI changes independently.
-5. **Build console-only:** apply `dc34-badgebloom-console.patch`, leave `dc34-vault` untouched, then build and flash. This should reproduce the 50% boundary if the current lead is correct.
-6. **Bisect the console patch** if console-only fails:
-   - Start with Rust-side command plumbing while retaining the stock generated light engine.
-   - Add independent eye controls.
-   - Add the generated BIO C/assembly changes.
-   - Add animation-speed accumulation last.
-   - Regenerate `lightgenes.rs` from `main.c` with the documented Zig version instead of hand-editing generated assembly.
-7. **Instrument the loader if needed.** Add visible before/after checkpoints around each `IniF` copy, or capture its physical UART. The existing approximate bar already points near PID 12, but a precise checkpoint removes ambiguity.
-8. Once a candidate boots, combine both patches and run the full physical behavior checklist.
-
-Do not “test” by mixing stock `loader.uf2` with custom `xous.uf2`/`swap.uf2` unless you have first verified their boot format and intentionally accept that experiment. Complete matched sets are the safe default.
-
-## Windows and USB workflow
-
-Builds are most straightforward in WSL2 because the Xous tools are Unix-oriented:
+The production build applies the original patches, both functional follow-up patches, and the loader fix:
 
 ```bash
-git clone https://github.com/atcasanova/DEFCON-34-badge-firmware.git
-cd DEFCON-34-badge-firmware
 npm ci
 npm test
 npm run build
 ./scripts/build-firmware.sh ./firmware-build
 ```
 
-For diagnostic variants, preserve the cloned sibling workspace with `BADGEBLOOM_BUILD_ROOT` and modify only the intended checkout before rebuilding. Record every source commit, patch selection, artifact SHA-256, and physical outcome.
+The resulting `loader.uf2`, `xous.uf2`, and `swap.uf2` are one matched set. Do not mix them with files from stock or another candidate.
 
-On the Windows host, put the badge into Update mode first, then flash an explicit candidate directory so `create.ps1` cannot silently download the known-bad latest BadgeBloom release:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\create.ps1 -Source "C:\path\to\candidate-firmware"
-```
-
-The correct physical update sequence for this badge is:
+Reliable physical update sequence for this badge:
 
 1. Disconnect USB.
 2. Hold any badge key.
-3. While holding it, press reset/power-cycle the badge.
+3. While holding it, press reset or power-cycle the badge.
 4. Release the key when the display says **Update mode**.
 5. Connect USB directly to Windows and wait for the `BAOCHIP` volume.
-6. Copy the matched `loader.uf2`, `xous.uf2`, and `swap.uf2` set.
+6. Flash an explicit candidate directory: `./create.ps1 -Source "C:\path\to\candidate"`.
 7. Wait for writes, safely eject, keep the badge powered, and press any badge button once to commit.
 
-Avoid VirtualBox USB pass-through during debugging. Direct Windows attachment is already proven to work.
-
-To restore stock firmware without a network request:
+To restore stock without a network request:
 
 ```powershell
-.\rollback.ps1 -ZipFile "C:\path\to\official-latest.zip"
+./rollback.ps1 -ZipFile "C:\path\to\official-latest.zip"
 ```
-
-### Serial logging limitation
-
-The badge exposes a USB CDC-ACM/COM console after enough of the system boots, but upstream explicitly warns that the virtual USB console cannot capture a crash during early boot. A hang in the loader may therefore never produce a usable Windows COM port.
-
-The fallback early console is on physical pads PB14 (badge TX) and PB13 (badge RX), at 1,000,000 baud, 8N1. **Do not attach a USB-UART adapter until the badge's VDDIO signal level has been verified**; upstream notes it may be 1.8 V or 3.3 V depending on the board. Never inject 5 V. See the upstream [serial console documentation](https://github.com/betrusted-io/xous-core/blob/main/README-consoles.md).
-
-If physical UART is inconvenient, a temporary diagnostic loader that renders explicit stage/tag numbers on the OLED is safer than guessing from the progress-bar width.
 
 ## Physical acceptance checklist
 
-A firmware build is not fixed merely because CI compiles it. Before publishing a replacement release, verify on the real badge:
-
-- Cold boot reaches the developer idle screen repeatedly.
-- Reset and power-cycle both boot normally.
-- Left button opens the camera.
-- A v2 light QR previews all eight perimeter LEDs and both eyes.
-- Keep persists the ring and eye configuration; Revert restores the previous state.
+- Cold boot, reset, and power-cycle repeatedly reach the normal idle application.
+- The screen does not remain covered by a permanent `DEV MODE` status label.
+- The default badge image remains available; there is no custom wallpaper transfer UI.
+- Left and middle each open the scanner.
+- A web-generated v2 QR previews all eight perimeter LEDs and both eyes.
+- Changing **Pulse speed** in the webapp changes the speed encoded into and applied by the pattern.
+- Keep persists ring, eye, and encoded speed settings across reboot.
+- Revert restores the previous ring, eye, and speed settings.
 - Legacy v1 light QR remains accepted and selects stock eye-follow behavior.
 - Eye modes work: follow, off, steady, blink, alternating wink, and breathe.
-- Side rocker up/down changes speed through 0.25x–2x; press resets to 1x; display indicator updates.
-- An eight-frame wallpaper transfer accepts frames in any order, ignores duplicates, shows `FRAME N DONE`/`ALREADY`, and reopens the camera for the next frame.
-- Wallpaper preview Keep/Revert works and persists after reboot.
-- Middle button shows the wallpaper and exits cleanly.
-- Right button shows a readable repository QR and exits cleanly.
-- Factory update mode and recovery remain reachable.
-- The web-generated QRs used in the test came from the current `main` build.
+- Rocker up/down does not alter the applied animation speed.
+- Holding the rocker for about 1.3 seconds opens the menu without selecting an item accidentally.
+- **Power Off** is the first menu item and powers the badge off when selected.
+- Right shows the stock gene-exchange nonce QR. Do not mistake this UI restoration for recovery of the erased `k0` secret.
+- Factory update mode and stock recovery remain reachable.
+- The test QR came from the current production web build.
 
-Only after this checklist passes should the project bump the version, publish a corrected release, and clearly mark v1.3.1 as broken/superseded.
-
-## Known secondary cleanup
-
-- Parts of [README.md](./README.md), [create.ps1](./create.ps1), and [flash.sh](./flash.sh) still describe entering Update mode as holding a button while connecting USB. On the actual battery-powered badge, the reliable sequence was holding a button while pressing reset/power-cycling, waiting for **Update mode**, and only then attaching USB. Correct those instructions with the firmware fix.
-- `rollback.ps1` already uses the corrected reset-first wording.
-- `rollback.ps1 -ZipFile` exists because SSL negotiation failed on the user's Windows PowerShell during direct download. The local ZIP route was added and tested with the real official archive.
-- DEV MODE is expected and permanent after the first developer firmware flash. It is not evidence that the stock rollback failed.
+Only after this checklist passes should the version be bumped and a replacement release supersede v1.3.1.
 
 ## Definition of done
 
-The task is complete when a clean checkout can reproducibly build a matched three-UF2 candidate, that exact candidate cold-boots on the physical badge, all controls/QR/wallpaper/eye behaviors above pass, recovery remains available, documentation reflects the real update sequence, and a new release supersedes v1.3.1 with recorded hashes and physical-test results.
+A clean checkout reproducibly builds the webapp and one matched three-UF2 candidate; that exact candidate cold-boots on the physical badge; every item in the simplified acceptance checklist passes; recovery remains available; and the release records the exact artifact hashes and physical-test result.

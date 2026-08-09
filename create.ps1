@@ -80,7 +80,7 @@ function Get-BadgeVolume {
 
     $Volumes = @(Get-Volume | Where-Object { $_.FileSystemLabel -eq $BadgeLabel -and $null -ne $_.DriveLetter })
     if ($Volumes.Count -eq 0) {
-        throw 'No BAOCHIP volume found. Hold any badge button while connecting USB and confirm Update mode.'
+        throw 'No BAOCHIP volume found. Disconnect USB, hold any badge button while resetting or power-cycling, release it at Update mode, then connect USB.'
     }
     if ($Volumes.Count -gt 1) {
         throw 'Multiple BAOCHIP volumes found. Select one with -Drive E: (using its actual letter).'

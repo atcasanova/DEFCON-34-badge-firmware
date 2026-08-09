@@ -1,0 +1,191 @@
+diff --git a/loader/src/main.rs b/loader/src/main.rs
+index 21ffcbb9..52e63c7b 100644
+--- a/loader/src/main.rs
++++ b/loader/src/main.rs
+@@ -560,7 +560,9 @@ fn boot_sequence(
+ 
+         #[cfg(feature = "board-baosec")]
+         {
++            crate::platform::diagnostic_status(&mut oled, 1, b'S', 0, 0, b'O');
+             phase_1(&mut cfg, detached_app, Some(&mut oled));
++            crate::platform::diagnostic_status(&mut oled, 2, b'S', 0, 0, b'O');
+             phase_2(&mut cfg, env_variables, Some(&mut oled));
+             crate::platform::progress_bar(&mut oled, 100);
+         }
+diff --git a/loader/src/phase1.rs b/loader/src/phase1.rs
+index 5ab3fd24..aef86b83 100644
+--- a/loader/src/phase1.rs
++++ b/loader/src/phase1.rs
+@@ -507,10 +507,24 @@ impl TagType {
+ /// located at the end of memory space.
+ fn copy_processes(cfg: &mut BootConfig, mut _fb: Option<&mut dyn FrameBuffer>) {
+     let mut _pid = 1;
+-    #[cfg(feature = "board-baosec")]
+-    let arg_len = cfg.args.iter().count();
+     for (_i, tag) in cfg.args.iter().enumerate() {
+         let tag_type = TagType::from(tag.name);
++        #[cfg(feature = "board-baosec")]
++        if let Some(ref mut fb) = _fb {
++            let display_pid = match tag_type {
++                TagType::IniF | TagType::IniE | TagType::IniS => _pid + 1,
++                TagType::XKrn => 1,
++                TagType::Other => 0,
++            };
++            let tag_code = match tag_type {
++                TagType::IniF => b'F',
++                TagType::IniE => b'E',
++                TagType::IniS => b'S',
++                TagType::XKrn => b'K',
++                TagType::Other => b'O',
++            };
++            crate::platform::diagnostic_status(*fb, 1, b'B', _i, display_pid, tag_code);
++        }
+         match tag_type {
+             TagType::IniF | TagType::IniE => {
+                 _pid += 1;
+@@ -1206,11 +1220,19 @@ fn copy_processes(cfg: &mut BootConfig, mut _fb: Option<&mut dyn FrameBuffer>) {
+         }
+         #[cfg(feature = "board-baosec")]
+         if let Some(ref mut fb) = _fb {
+-            let start = 5;
+-            let end = 70;
+-            let increment = (end - start) / arg_len;
+-            let percentage = start + increment * _i;
+-            crate::platform::progress_bar(*fb, percentage);
++            let display_pid = match tag_type {
++                TagType::IniF | TagType::IniE | TagType::IniS => _pid,
++                TagType::XKrn => 1,
++                TagType::Other => 0,
++            };
++            let tag_code = match tag_type {
++                TagType::IniF => b'F',
++                TagType::IniE => b'E',
++                TagType::IniS => b'S',
++                TagType::XKrn => b'K',
++                TagType::Other => b'O',
++            };
++            crate::platform::diagnostic_status(*fb, 1, b'A', _i, display_pid, tag_code);
+         }
+     }
+ }
+diff --git a/loader/src/phase2.rs b/loader/src/phase2.rs
+index b3a5b40b..6ebef400 100644
+--- a/loader/src/phase2.rs
++++ b/loader/src/phase2.rs
+@@ -46,9 +46,23 @@ pub fn phase_2(cfg: &mut BootConfig, env_variables: EnvVariables, mut _fb: Optio
+     #[cfg(feature = "bao1x")]
+     trng.setup_raw_generation(32); // this is safe to call multiple times to affirm the TRNG state
+ 
+-    #[cfg(feature = "board-baosec")]
+-    let arg_len = args.iter().count();
+     for (_i, tag) in args.iter().enumerate() {
++        #[cfg(feature = "board-baosec")]
++        if let Some(ref mut fb) = _fb {
++            let display_pid = if tag.name == u32::from_le_bytes(*b"XKrn") { 1 } else { pid };
++            let tag_code = if tag.name == u32::from_le_bytes(*b"IniF") {
++                b'F'
++            } else if tag.name == u32::from_le_bytes(*b"IniE") {
++                b'E'
++            } else if tag.name == u32::from_le_bytes(*b"IniS") {
++                b'S'
++            } else if tag.name == u32::from_le_bytes(*b"XKrn") {
++                b'K'
++            } else {
++                b'O'
++            };
++            crate::platform::diagnostic_status(*fb, 2, b'B', _i, display_pid, tag_code);
++        }
+         let mut env_header = crate::env::EnvHeader::default();
+         #[allow(unused_mut)]
+         let mut pid_env = env_variables.clone();
+@@ -120,11 +134,23 @@ pub fn phase_2(cfg: &mut BootConfig, env_variables: EnvVariables, mut _fb: Optio
+         }
+         #[cfg(feature = "board-baosec")]
+         if let Some(ref mut fb) = _fb {
+-            let start = 70;
+-            let end = 95;
+-            let increment = (end - start) / arg_len;
+-            let percentage = start + increment * _i;
+-            crate::platform::progress_bar(*fb, percentage);
++            let completed_pid = if tag.name == u32::from_le_bytes(*b"XKrn") {
++                1
++            } else {
++                pid.saturating_sub(1)
++            };
++            let tag_code = if tag.name == u32::from_le_bytes(*b"IniF") {
++                b'F'
++            } else if tag.name == u32::from_le_bytes(*b"IniE") {
++                b'E'
++            } else if tag.name == u32::from_le_bytes(*b"IniS") {
++                b'S'
++            } else if tag.name == u32::from_le_bytes(*b"XKrn") {
++                b'K'
++            } else {
++                b'O'
++            };
++            crate::platform::diagnostic_status(*fb, 2, b'A', _i, completed_pid, tag_code);
+         }
+     }
+ 
+diff --git a/loader/src/platform/bao1x/bao1x.rs b/loader/src/platform/bao1x/bao1x.rs
+index 5220e28a..bf014c98 100644
+--- a/loader/src/platform/bao1x/bao1x.rs
++++ b/loader/src/platform/bao1x/bao1x.rs
+@@ -417,3 +417,57 @@ pub fn progress_bar(fb: &mut dyn FrameBuffer, progress: usize) {
+     }
+     fb.0.draw().ok();
+ }
++
++#[cfg(feature = "board-baosec")]
++/// Render a compact early-boot checkpoint below the boot marquee.
++///
++/// Format: `D<phase><event> I<index> P<pid> T<tag>`, where event is
++/// `B` (before), `A` (after), or `S` (phase start), and tag is one of
++/// `F` (IniF), `E` (IniE), `S` (IniS), `K` (kernel), or `O` (other).
++pub fn diagnostic_status(
++    fb: &mut dyn FrameBuffer,
++    phase: u8,
++    event: u8,
++    index: usize,
++    pid: u8,
++    tag: u8,
++) {
++    use ux_api::bitmaps::baochip128x128::MARQUEE_BELOW;
++    use ux_api::minigfx::{ColorNative, DrawStyle, PixelColor, Point, Rectangle};
++
++    fn decimal_2(value: usize) -> [u8; 2] {
++        let value = value.min(99);
++        [b'0' + (value / 10) as u8, b'0' + (value % 10) as u8]
++    }
++
++    let index = decimal_2(index);
++    let pid = decimal_2(pid as usize);
++    let mut text = *b"D0S I00 P00 TO";
++    text[1] = b'0' + phase.min(9);
++    text[2] = event;
++    text[5..7].copy_from_slice(&index);
++    text[9..11].copy_from_slice(&pid);
++    text[13] = tag;
++
++    let mut fb = ux_api::minigfx::DynFb(fb);
++    ux_api::minigfx::op::rectangle(
++        &mut fb,
++        Rectangle::new_with_style(
++            Point::new(0, MARQUEE_BELOW as isize),
++            Point::new(128, 128),
++            DrawStyle::new(PixelColor::Dark, PixelColor::Dark, 1),
++        ),
++        None,
++        false,
++    );
++    // Every byte in `text` is assigned from an ASCII literal or decimal digit.
++    let text = unsafe { core::str::from_utf8_unchecked(&text) };
++    super::gfx::msg(
++        &mut fb,
++        text,
++        Point::new(20, MARQUEE_BELOW as isize + 8),
++        ColorNative::from(PixelColor::Light),
++        ColorNative::from(PixelColor::Dark),
++    );
++    fb.0.draw().ok();
++}

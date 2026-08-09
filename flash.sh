@@ -133,7 +133,7 @@ select_badge() {
   fi
 
   mapfile -t rows < <(badge_rows)
-  ((${#rows[@]} > 0)) || fail "no BAOCHIP volume found; hold any badge button while connecting USB and confirm Update mode" 2
+  ((${#rows[@]} > 0)) || fail "no BAOCHIP volume found; disconnect USB, hold any badge button while resetting or power-cycling, release it at Update mode, then connect USB" 2
   ((${#rows[@]} == 1)) || fail "multiple BAOCHIP volumes found; select one with --mount"
 
   local badge_device badge_mount

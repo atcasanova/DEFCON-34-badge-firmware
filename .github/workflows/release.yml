@@ -31,8 +31,7 @@ jobs:
           cp firmware-build/loader.uf2 firmware-build/xous.uf2 firmware-build/swap.uf2 release-assets/
           cp firmware-build/BUILD-MANIFEST.txt release-assets/dc34-badgebloom-firmware-build-manifest.txt
           cp firmware-build/SHA256SUMS.txt "release-assets/dc34-badgebloom-firmware-${GITHUB_REF_NAME}-SHA256SUMS.txt"
-          cp firmware/dc34-badgebloom-firmware.patch release-assets/
-          cp firmware/dc34-badgebloom-console.patch release-assets/
+          cp firmware/*.patch release-assets/
           cp flash.sh create.ps1 release-assets/
           (cd release-assets && sha256sum * > "dc34-badgebloom-${GITHUB_REF_NAME}-SHA256SUMS.txt")
       - name: Publish GitHub release

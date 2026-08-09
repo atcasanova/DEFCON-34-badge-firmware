@@ -1,14 +1,6 @@
 import QRCode from "qrcode";
 import "./styles.css";
 import { EYE_BEHAVIORS, encodeLightQr, FIELD_NAMES, hexToRgb, hsvToCss } from "./protocol.js";
-import {
-  IMAGE_FRAME_COUNT,
-  IMAGE_HEIGHT,
-  IMAGE_WIDTH,
-  ditherGrayscale,
-  encodeImageFrames,
-  packMonochromeBitmap,
-} from "./image-protocol.js";
 
 const form = document.querySelector("#patternForm");
 const controls = {
@@ -34,6 +26,7 @@ const byteReadout = document.querySelector("#byteReadout");
 const status = document.querySelector("#transferStatus");
 const ledRing = document.querySelector("#ledRing");
 const eyeLeds = [document.querySelector("#leftEyeLed"), document.querySelector("#rightEyeLed")];
+const rgbTriplets = [...document.querySelectorAll("[data-color-target]")];
 let currentEncoding;
 let qrRevision = 0;
 
@@ -80,7 +73,34 @@ function applySettings(settings) {
     if (input.type === "checkbox") input.checked = value;
     else input.value = value;
   }
+  syncAllRgbTriplets();
   update();
+}
+
+function byteToHex(value) {
+  return Math.max(0, Math.min(255, Number(value) || 0)).toString(16).padStart(2, "0");
+}
+
+function syncRgbTripletFromColor(triplet) {
+  const target = document.querySelector(`#${triplet.dataset.colorTarget}`);
+  const rgb = hexToRgb(target.value);
+  triplet.querySelectorAll("input").forEach((input, index) => {
+    input.value = rgb[index];
+  });
+}
+
+function syncColorFromRgbTriplet(triplet) {
+  const target = document.querySelector(`#${triplet.dataset.colorTarget}`);
+  const channels = [...triplet.querySelectorAll("input")].map((input) => {
+    const value = Math.max(0, Math.min(255, Number(input.value) || 0));
+    input.value = value;
+    return value;
+  });
+  target.value = `#${channels.map(byteToHex).join("")}`;
+}
+
+function syncAllRgbTriplets() {
+  rgbTriplets.forEach(syncRgbTripletFromColor);
 }
 
 function updateOutputs() {
@@ -108,9 +128,9 @@ async function updateQr() {
     });
     await QRCode.toCanvas(qrCanvas, currentEncoding.uri, {
       errorCorrectionLevel: "M",
-      margin: 3,
-      width: 280,
-      color: { dark: "#10130fff", light: "#f3f1e8ff" },
+      margin: 4,
+      width: 360,
+      color: { dark: "#000000ff", light: "#ffffffff" },
     });
     if (revision === qrRevision) status.textContent = "QR is ready.";
   } catch (error) {
@@ -207,7 +227,15 @@ function animateEyes(timeMs, ringColors) {
   setEye(eyeLeds[1], controls.eyeRight.value, rightIntensity);
 }
 
-form.addEventListener("input", update);
+form.addEventListener("input", (event) => {
+  if (event.target.matches('input[type="color"]')) {
+    const triplet = rgbTriplets.find((item) => item.dataset.colorTarget === event.target.id);
+    if (triplet) syncRgbTripletFromColor(triplet);
+  } else if (event.target.closest("[data-color-target]")) {
+    syncColorFromRgbTriplet(event.target.closest("[data-color-target]"));
+  }
+  update();
+});
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applySettings(presets[button.dataset.preset]));
 });
@@ -248,218 +276,6 @@ document.querySelector("#downloadQr").addEventListener("click", () => {
   link.click();
   status.textContent = "QR downloaded.";
 });
-
-const wallpaperUi = {
-  file: document.querySelector("#wallpaperFile"),
-  fileName: document.querySelector("#wallpaperFileName"),
-  fit: document.querySelector("#wallpaperFit"),
-  dither: document.querySelector("#wallpaperDither"),
-  threshold: document.querySelector("#wallpaperThreshold"),
-  thresholdOutput: document.querySelector('output[for="wallpaperThreshold"]'),
-  invert: document.querySelector("#wallpaperInvert"),
-  preview: document.querySelector("#wallpaperPreview"),
-  previewPlaceholder: document.querySelector("#wallpaperPlaceholder"),
-  qr: document.querySelector("#wallpaperQrCanvas"),
-  qrPlaceholder: document.querySelector("#wallpaperQrPlaceholder"),
-  frameCounter: document.querySelector("#frameCounter"),
-  frameTimer: document.querySelector("#frameTimer"),
-  frameHold: document.querySelector("#frameHold"),
-  frameHoldOutput: document.querySelector('output[for="frameHold"]'),
-  toggle: document.querySelector("#carouselToggle"),
-  previous: document.querySelector("#previousFrame"),
-  next: document.querySelector("#nextFrame"),
-  download: document.querySelector("#downloadFrame"),
-  status: document.querySelector("#wallpaperStatus"),
-};
-
-const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024;
-const MAX_IMAGE_EDGE = 4096;
-const MAX_IMAGE_PIXELS = 16_000_000;
-const wallpaperSourceCanvas = document.createElement("canvas");
-wallpaperSourceCanvas.width = IMAGE_WIDTH;
-wallpaperSourceCanvas.height = IMAGE_HEIGHT;
-let wallpaperSource;
-let wallpaperFrames = [];
-let wallpaperFrameIndex = 0;
-let wallpaperQrRevision = 0;
-let carouselTimer;
-let carouselRunning = false;
-
-function frameHoldLabel() {
-  return `${(Number(wallpaperUi.frameHold.value) / 1000).toFixed(2).replace(/0$/, "")} seconds`;
-}
-
-function setCarouselRunning(running) {
-  carouselRunning = running && wallpaperFrames.length > 0;
-  wallpaperUi.toggle.textContent = carouselRunning ? "Pause carousel" : "Start carousel";
-  clearTimeout(carouselTimer);
-  if (carouselRunning) scheduleNextFrame();
-}
-
-function scheduleNextFrame() {
-  clearTimeout(carouselTimer);
-  if (!carouselRunning) return;
-  carouselTimer = setTimeout(async () => {
-    await showWallpaperFrame((wallpaperFrameIndex + 1) % wallpaperFrames.length);
-    scheduleNextFrame();
-  }, Number(wallpaperUi.frameHold.value));
-}
-
-async function showWallpaperFrame(index) {
-  if (wallpaperFrames.length === 0) return;
-  wallpaperFrameIndex = (index + wallpaperFrames.length) % wallpaperFrames.length;
-  const revision = ++wallpaperQrRevision;
-  const frame = wallpaperFrames[wallpaperFrameIndex];
-  await QRCode.toCanvas(wallpaperUi.qr, frame.uri, {
-    errorCorrectionLevel: "M",
-    margin: 3,
-    width: 320,
-    color: { dark: "#10130fff", light: "#f3f1e8ff" },
-  });
-  if (revision !== wallpaperQrRevision) return;
-  wallpaperUi.qrPlaceholder.hidden = true;
-  wallpaperUi.frameCounter.textContent = `FRAME ${wallpaperFrameIndex + 1} / ${IMAGE_FRAME_COUNT}`;
-  wallpaperUi.status.textContent = carouselRunning
-    ? `Carousel running · transfer ${frame.transferId.toString(16).padStart(8, "0").toUpperCase()}`
-    : `Frame ${wallpaperFrameIndex + 1} ready · start the carousel when the badge camera is aimed.`;
-}
-
-function drawMonochromePreview(blackPixels) {
-  const context = wallpaperUi.preview.getContext("2d");
-  const preview = context.createImageData(IMAGE_WIDTH, IMAGE_HEIGHT);
-  for (let index = 0; index < blackPixels.length; index += 1) {
-    const offset = index * 4;
-    const value = blackPixels[index] ? 12 : 243;
-    preview.data[offset] = value;
-    preview.data[offset + 1] = blackPixels[index] ? 15 : 241;
-    preview.data[offset + 2] = blackPixels[index] ? 12 : 232;
-    preview.data[offset + 3] = 255;
-  }
-  context.putImageData(preview, 0, 0);
-  wallpaperUi.previewPlaceholder.hidden = true;
-}
-
-async function rebuildWallpaper() {
-  wallpaperUi.thresholdOutput.value = wallpaperUi.threshold.value;
-  if (!wallpaperSource) return;
-  setCarouselRunning(false);
-
-  const context = wallpaperSourceCanvas.getContext("2d", { willReadFrequently: true });
-  context.fillStyle = "white";
-  context.fillRect(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
-  const sourceRatio = wallpaperSource.width / wallpaperSource.height;
-  if (wallpaperUi.fit.value === "cover") {
-    let sourceWidth = wallpaperSource.width;
-    let sourceHeight = wallpaperSource.height;
-    if (sourceRatio > 1) sourceWidth = wallpaperSource.height;
-    else sourceHeight = wallpaperSource.width;
-    context.drawImage(
-      wallpaperSource,
-      (wallpaperSource.width - sourceWidth) / 2,
-      (wallpaperSource.height - sourceHeight) / 2,
-      sourceWidth,
-      sourceHeight,
-      0,
-      0,
-      IMAGE_WIDTH,
-      IMAGE_HEIGHT,
-    );
-  } else {
-    const scale = Math.min(IMAGE_WIDTH / wallpaperSource.width, IMAGE_HEIGHT / wallpaperSource.height);
-    const width = wallpaperSource.width * scale;
-    const height = wallpaperSource.height * scale;
-    context.drawImage(
-      wallpaperSource,
-      (IMAGE_WIDTH - width) / 2,
-      (IMAGE_HEIGHT - height) / 2,
-      width,
-      height,
-    );
-  }
-
-  const rgba = context.getImageData(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT).data;
-  const grayscale = new Float32Array(IMAGE_WIDTH * IMAGE_HEIGHT);
-  for (let index = 0; index < grayscale.length; index += 1) {
-    const offset = index * 4;
-    const alpha = rgba[offset + 3] / 255;
-    const luminance = 0.2126 * rgba[offset] + 0.7152 * rgba[offset + 1] + 0.0722 * rgba[offset + 2];
-    grayscale[index] = luminance * alpha + 255 * (1 - alpha);
-  }
-
-  const blackPixels = ditherGrayscale(grayscale, {
-    algorithm: wallpaperUi.dither.value,
-    threshold: Number(wallpaperUi.threshold.value),
-    invert: wallpaperUi.invert.checked,
-  });
-  drawMonochromePreview(blackPixels);
-  wallpaperFrames = encodeImageFrames(packMonochromeBitmap(blackPixels));
-  wallpaperFrameIndex = 0;
-  [wallpaperUi.toggle, wallpaperUi.previous, wallpaperUi.next, wallpaperUi.download]
-    .forEach((button) => { button.disabled = false; });
-  await showWallpaperFrame(0);
-}
-
-async function loadWallpaperFile(file) {
-  if (!file) return;
-  setCarouselRunning(false);
-  if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
-    throw new Error("Choose a PNG, JPEG, or WebP image. SVG and animated formats are not accepted.");
-  }
-  if (file.size === 0 || file.size > MAX_IMAGE_FILE_BYTES) {
-    throw new Error("Image files must be between 1 byte and 5 MiB.");
-  }
-  const decoded = await createImageBitmap(file);
-  if (
-    decoded.width > MAX_IMAGE_EDGE ||
-    decoded.height > MAX_IMAGE_EDGE ||
-    decoded.width * decoded.height > MAX_IMAGE_PIXELS
-  ) {
-    decoded.close();
-    throw new Error("Decoded images are limited to 4096×4096 and 16 megapixels.");
-  }
-  wallpaperSource?.close();
-  wallpaperSource = decoded;
-  wallpaperUi.fileName.textContent = `${file.name} · ${decoded.width}×${decoded.height} · ${(file.size / 1024).toFixed(0)} KiB`;
-  await rebuildWallpaper();
-}
-
-wallpaperUi.file.addEventListener("change", async () => {
-  try {
-    await loadWallpaperFile(wallpaperUi.file.files[0]);
-  } catch (error) {
-    wallpaperUi.file.value = "";
-    wallpaperUi.status.textContent = error.message;
-  }
-});
-[wallpaperUi.fit, wallpaperUi.dither, wallpaperUi.threshold, wallpaperUi.invert]
-  .forEach((control) => control.addEventListener("input", () => rebuildWallpaper().catch((error) => {
-    wallpaperUi.status.textContent = error.message;
-  })));
-
-wallpaperUi.frameHold.addEventListener("input", () => {
-  wallpaperUi.frameHoldOutput.value = frameHoldLabel();
-  wallpaperUi.frameTimer.textContent = `HOLD ${(Number(wallpaperUi.frameHold.value) / 1000).toFixed(2).replace(/0$/, "")}S`;
-  if (carouselRunning) scheduleNextFrame();
-});
-wallpaperUi.toggle.addEventListener("click", () => setCarouselRunning(!carouselRunning));
-wallpaperUi.previous.addEventListener("click", async () => {
-  setCarouselRunning(false);
-  await showWallpaperFrame(wallpaperFrameIndex - 1);
-});
-wallpaperUi.next.addEventListener("click", async () => {
-  setCarouselRunning(false);
-  await showWallpaperFrame(wallpaperFrameIndex + 1);
-});
-wallpaperUi.download.addEventListener("click", () => {
-  const link = document.createElement("a");
-  link.download = `dc34-badgebloom-wallpaper-${wallpaperFrameIndex + 1}-of-${IMAGE_FRAME_COUNT}.png`;
-  link.href = wallpaperUi.qr.toDataURL("image/png");
-  link.click();
-  wallpaperUi.status.textContent = `Frame ${wallpaperFrameIndex + 1} downloaded.`;
-});
-
-wallpaperUi.thresholdOutput.value = wallpaperUi.threshold.value;
-wallpaperUi.frameHoldOutput.value = frameHoldLabel();
+syncAllRgbTriplets();
 update();
 requestAnimationFrame(animate);

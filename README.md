@@ -1,6 +1,6 @@
 # DC34 BadgeBloom: Premium AI SLOP
 
-Design DEF CON 34 badge light patterns and monochrome wallpapers in a browser, then fire them into the badge through its rear camera because apparently USB cables were not sufficiently dramatic.
+Design DEF CON 34 badge light patterns in a browser, then fire one compact QR into the badge through its rear camera because apparently USB cables were not sufficiently dramatic.
 
 **Live AI SLOP:** https://atcasanova.github.io/DEFCON-34-badge-firmware/
 
@@ -17,13 +17,10 @@ I made this while drinking at a bar in Las Vegas, without access to a computer. 
 - Controls hue range, saturation, waves, speed, direction, hue drift, white chaser, and contrast
 - Controls both eye LEDs independently with color, brightness, stock-follow, off, steady, blink, wink, and breathe modes
 - Previews all ten LEDs: two eyes plus the eight-LED diamond layout
-- Uses the side rocker as a live 0.25×–2× animation speed gauge
-- Imports local PNG, JPEG, and WebP files without sending them anywhere
-- Crops or fits images to 128×128, then applies thresholding or Floyd–Steinberg dithering
-- Packs wallpapers exactly like the official DC34 image uploader
-- Transfers a wallpaper through a slow, duplicate-safe eight-frame QR carousel
-- Validates light data with CRC-16 and wallpaper frames/images with CRC-32
-- Previews both light patterns and wallpapers before **Keep / Revert**
+- Offers native color pickers plus editable R/G/B channel values
+- Keeps the pattern's encoded speed exactly as selected in the web editor
+- Validates light data with CRC-16
+- Previews light patterns before **Keep / Revert**
 - Stores accepted settings in PDDB and restores them after boot
 - Contains no backend, analytics, cookies, accounts, cloud image upload, or adult supervision
 
@@ -33,24 +30,21 @@ In developer idle mode:
 
 | Button | Highly sophisticated operation |
 |---|---|
-| Left | Open the camera and scan BadgeBloom light or wallpaper QR codes |
-| Middle | Display the saved wallpaper full-screen |
-| Right | Display a QR linking back to this repository, completing the circle of slop |
-| Side rocker up | Increase animation speed by 0.25×, up to 2× |
-| Side rocker down | Decrease animation speed by 0.25×, down to 0.25× |
-| Side rocker press | Reset animation speed to the encoded 1× rate |
+| Left / Middle | Open the camera and scan a BadgeBloom light QR |
+| Right | Show the stock gene-exchange nonce QR |
+| Side rocker hold | Open the menu with **Power Off** selected first |
 
-The badge screen shows the active speed multiplier in developer idle mode. Any front button exits the wallpaper or repository display. Factory tests, menus, confirmation controls, update mode, and recovery behavior retain their normal mappings; the rocker becomes a speed control only in developer idle mode.
+The rocker no longer changes animation speed. The speed selected in the web editor is encoded directly in the light phenotype. The stock exchange UI is present, but developer mode permanently erases the provisioned `k0` secret, so restoring its buttons does not restore authenticated exchange with factory badges.
 
 ## Light patterns: one QR, eighteen glorious bytes
 
 Protocol v2 keeps the badge console's native 9-byte ring phenotype intact and appends nine eye bytes: behavior, left RGB, right RGB, tempo in 25 ms units, and brightness. The record is wrapped as:
 
 ```text
-dc34light://<Base45 record>
+DC34LIGHT://<Base45 record>
 ```
 
-The firmware checks the magic, version, flags, exact length, canonical field ranges, and CRC-16/CCITT-FALSE. It uses the console's existing `Force` opcode for the ring and a patched LED-engine command for the two eyes. Accepted patterns are persisted together in PDDB. Legacy v1 nine-byte QRs remain accepted and select the stock eye-follow behavior.
+The firmware checks the magic, version, flags, exact length, canonical field ranges, and CRC-16/CCITT-FALSE. The uppercase prefix keeps the complete QR in its lower-density alphanumeric mode; old lowercase codes remain accepted. Forced ring updates use the same proven FIFO sender as the stock `SetGene` path, including the BIO write tag and clear boundaries. Custom-eye startup also fails dark rather than briefly selecting full-power white. Accepted patterns are persisted together in PDDB. Legacy v1 nine-byte QRs remain accepted and select the stock eye-follow behavior.
 
 ```text
 ring:  03 A0 FF DC F5 00 80 FF FF
@@ -58,45 +52,12 @@ eyes:  04 12 34 56 AB CD EF 3C D2
 body:  44 43 33 34 02 00 <ring> <eyes> <CRC-16>
 ```
 
-## Wallpapers: eight QRs, zero cinema
-
-A 128×128 one-bit wallpaper is 2,048 bytes. Stuffing that into one QR produces a version-39 optical brick that the badge camera would be expected to read while everyone nearby is moving and yelling. That seemed rude.
-
-BadgeBloom therefore creates eight QR frames containing 256 bytes each:
-
-```text
-dc34image://<Base45 frame record>
-```
-
-Every frame includes `D34I` magic, protocol version, reserved flags, a whole-image CRC-32 transfer ID, frame index/count, payload length, payload, and its own CRC-32. The all-zero bitmap has transfer ID `F1E8BA9E`; its first frame CRC is `FF566FB0`.
-
-The carousel defaults to one completely stationary frame every 2.5 seconds—not video FPS. The badge:
-
-1. Accepts frames in any order.
-2. Ignores duplicates.
-3. Shows `FRAME N DONE`, the received count, and `NEXT QR` after each successful import.
-4. Reopens the camera until all eight frames arrive or the user cancels.
-5. Validates the complete image before showing a preview.
-6. Writes to PDDB only after **Keep**.
-
-If the camera misses something, leave it aimed at the carousel for another lap. The frame-hold slider sits directly below the QR so it can be tuned while watching the badge's completion cue. Manual Previous/Next controls are included for artisanal frame delivery.
-
-### Image guardrails, because even slop needs a bowl
-
-- Accepted formats: PNG, JPEG, and WebP
-- Rejected: SVG, animation formats, HEIC, and unknown MIME types
-- Maximum file size: 5 MiB
-- Maximum decoded dimensions: 4096×4096 and 16 megapixels
-- Transparent pixels are composited onto white
-- Output is always 128×128, one bit per pixel, exactly 2,048 bytes
-- Conversion and QR generation happen entirely in the browser
-
 ## Using it
 
 1. Open the [live editor](https://atcasanova.github.io/DEFCON-34-badge-firmware/).
-2. Create a ring-and-eye light pattern or select a wallpaper image.
-3. Press the badge's left button.
-4. Scan the single light QR, or start the slow wallpaper carousel and keep the camera aimed at it.
+2. Create a ring-and-eye light pattern, including its encoded pulse speed.
+3. Press the badge's left or middle button.
+4. Scan the single light QR.
 5. Inspect the physical result and choose **Keep** or **Revert**.
 
 The QR formats are intentionally unauthenticated. Their checksums detect corruption, not hostile input. Scan only data you intend to preview. Las Vegas already contains enough untrusted input.
@@ -110,11 +71,11 @@ Starting with **v1.2.0**, releases contain a complete, developer-signed firmware
 - `swap.uf2`
 - `dc34-badgebloom-firmware-<version>.zip` containing all three files, a build manifest, and firmware checksums
 - `dc34-badgebloom-firmware.patch` containing the vault/UI changes
-- `dc34-badgebloom-console.patch` containing the eye and animation-clock changes
+- `dc34-badgebloom-console.patch` containing the eye/BIO changes
 
 Download all three UF2 files from the [latest release](https://github.com/atcasanova/DEFCON-34-badge-firmware/releases/latest), or download and extract the firmware ZIP. Keep the three files from the same release together; mixing versions is exciting in the wrong way.
 
-The artifacts are compiled with the public Xous developer key. They were successfully built for the real `riscv32imac-unknown-xous-elf` target and checked as UF2 images for Baochip family `0xA7D76373`. Camera timing and button behavior still deserve validation on physical badge hardware before this AI SLOP is mistaken for avionics.
+The artifacts are compiled with the public Xous developer key. They were successfully built for the real `riscv32imac-unknown-xous-elf` target and checked as UF2 images for Baochip family `0xA7D76373`. QR scanning and button behavior still deserve validation on physical badge hardware before this AI SLOP is mistaken for avionics.
 
 ## Developing and deploying the web-flavored AI SLOP
 
@@ -132,13 +93,15 @@ Build the production bundle with:
 npm run build
 ```
 
-The build also synchronizes the compiled bundle to the repository root so both GitHub Pages publishing modes serve the same files. Tests cover Base45, CRC-16, CRC-32, v1/v2 light records, eye fields, wallpaper records, corruption rejection, out-of-order assembly, duplicates, and the official wallpaper bit/word ordering.
+The build also synchronizes the compiled bundle to the repository root so both GitHub Pages publishing modes serve the same files. Tests cover Base45, CRC-16, v1/v2 light records, eye fields, and corruption rejection.
 
 Pushing `main` deploys `dist/` through the GitHub Pages workflow. To deploy it somewhere else, upload the contents of `dist/` to any static host; it needs no server-side code, environment variables, or database.
 
 ## Building the firmware-flavored AI SLOP
 
-The reproducible build script clones and pins the exact sources, installs Rust 1.97.1, installs Xous's custom target, applies both BadgeBloom patches, compiles the patched LED console and vault, packs the operating system, and signs it with the public developer key. The generated BIO assembly is committed in the console patch, so ordinary firmware builds do not require Zig.
+The reproducible build script clones and pins the exact sources, installs Rust 1.97.1, installs Xous's custom target, applies both BadgeBloom patches plus the Xous `IniS`/`NOCOPY` loader fix required by the enlarged vault image, compiles the patched LED console and vault, packs the operating system, and signs it with the public developer key. The generated BIO assembly is committed in the console patch, so ordinary firmware builds do not require Zig.
+
+The loader fix prevents zero-filled ELF sections such as `.bss` from advancing or decrypting nonexistent source bytes. Without it, a `NOCOPY` section that crosses the final encrypted data-page boundary is mistaken for source data and the loader attempts to decrypt the swap MAC table. This exact boundary case was reproduced and the corrected loader was physically verified to reach `DEV MODE`.
 
 The source set is intentionally pinned:
 
@@ -179,6 +142,15 @@ workspace/
 
 Set `BADGEBLOOM_BUILD_ROOT` to an empty directory if you want to preserve that workspace for debugging. Otherwise it is safely removed after the build.
 
+For an early-boot diagnostic build, enable the on-screen loader checkpoints and use a separate output directory:
+
+```bash
+BADGEBLOOM_DIAGNOSTIC_LOADER=1 \
+  ./scripts/build-firmware.sh ./firmware-build-diagnostic
+```
+
+The diagnostic loader replaces the progress bar with a compact checkpoint such as `D1B I11 P12 TF`: phase 1, before item 11, PID 12, `IniF`. `S`, `B`, and `A` mean phase start, before, and after; tag letters `F`, `E`, `S`, `K`, and `O` mean `IniF`, `IniE`, `IniS`, kernel, and other. This mode is for physical boot diagnosis and should not be published as production firmware.
+
 If you modify `firmware/dc34-badgebloom-console.patch` at the C level, regenerate the LED engine with Zig 0.15.2 before building. This is contributor tooling, not required for the normal pinned build:
 
 ```bash
@@ -213,8 +185,8 @@ Use `-Source C:\path\to\firmware-build` for an explicit artifact directory or `-
 Manual route:
 
 1. Download and extract the firmware ZIP from the latest release. Do not copy the ZIP itself.
-2. Disconnect the badge core. Hold **any badge button** while connecting it with a data-capable USB cable.
-3. Confirm the badge screen says **Update mode**. Windows should mount it as a removable drive.
+2. Disconnect USB. Hold **any badge button**, then press reset or power-cycle the badge while continuing to hold the button.
+3. Release the button after the screen says **Update mode**, then connect a data-capable USB cable. Windows should mount it as a removable drive named `BAOCHIP`.
 4. Copy `loader.uf2`, `xous.uf2`, and `swap.uf2` to the root of that drive. Copy all three from the same release.
 5. Wait for every copy to finish, then use **Eject** or **Safely Remove Hardware** on the removable drive.
 6. While the badge is still powered, press any badge button. This final press commits any partially buffered sector and boots the new firmware.
@@ -240,8 +212,8 @@ chmod +x flash.sh
 Manual route:
 
 1. Download and extract the firmware ZIP.
-2. Disconnect the badge core. Hold **any badge button** while reconnecting it over a data-capable USB cable.
-3. Confirm **Update mode** appears, then identify the newly mounted removable drive:
+2. Disconnect USB. Hold **any badge button**, then press reset or power-cycle the badge while continuing to hold the button.
+3. Release the button after **Update mode** appears, reconnect a data-capable USB cable, then identify the newly mounted removable drive:
 
    ```bash
    lsblk -o NAME,LABEL,SIZE,MOUNTPOINTS

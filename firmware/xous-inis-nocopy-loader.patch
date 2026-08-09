@@ -1,0 +1,49 @@
+diff --git a/loader/src/phase1.rs b/loader/src/phase1.rs
+index 5ab3fd24..37012118 100644
+--- a/loader/src/phase1.rs
++++ b/loader/src/phase1.rs
+@@ -864,7 +864,11 @@ fn copy_processes(cfg: &mut BootConfig, mut _fb: Option<&mut dyn FrameBuffer>) {
+                             let src_swap_img_page = src_swap_img_addr & !(PAGE_SIZE - 1);
+                             let src_swap_img_offset = src_swap_img_addr & (PAGE_SIZE - 1);
+                             // it's almost free to check, so we check at every loop start
+-                            if last_decrypt_address != Some(src_swap_img_page) {
++                            // NOCOPY sections (for example .bss) have no bytes in the source image.
++                            // They describe zero-filled virtual memory only, so reading or advancing the
++                            // source pointer would eventually walk into the MAC table at the end of the
++                            // encrypted image when the virtual section crosses the final data-page boundary.
++                            if !section.no_copy() && last_decrypt_address != Some(src_swap_img_page) {
+                                 // src_swap_img_page is in offsets relative to start of ELF - add 0x1000 to
+                                 // get absolute block
+                                 let phys_address = src_swap_img_page + 0x1000;
+@@ -948,13 +952,17 @@ fn copy_processes(cfg: &mut BootConfig, mut _fb: Option<&mut dyn FrameBuffer>) {
+                                     hashed_count
+                                 );
+                             }
+-                            let decrypt_avail = remaining_in_page(src_swap_img_addr);
+                             let dst_page_avail = remaining_in_page(dst_page_vaddr);
+                             let dst_page_offset = dst_page_vaddr & (PAGE_SIZE - 1);
+-                            let copyable = if decrypt_avail >= dst_page_avail {
++                            let copyable = if section.no_copy() {
+                                 dst_page_avail.min(bytes_to_copy)
+                             } else {
+-                                decrypt_avail.min(bytes_to_copy)
++                                let decrypt_avail = remaining_in_page(src_swap_img_addr);
++                                if decrypt_avail >= dst_page_avail {
++                                    dst_page_avail.min(bytes_to_copy)
++                                } else {
++                                    decrypt_avail.min(bytes_to_copy)
++                                }
+                             };
+                             if !section.no_copy() {
+                                 working_buf[dst_page_offset..dst_page_offset + copyable].copy_from_slice(
+@@ -969,7 +977,9 @@ fn copy_processes(cfg: &mut BootConfig, mut _fb: Option<&mut dyn FrameBuffer>) {
+                             }
+                             bytes_to_copy -= copyable;
+                             dst_page_vaddr += copyable;
+-                            src_swap_img_addr += copyable;
++                            if !section.no_copy() {
++                                src_swap_img_addr += copyable;
++                            }
+                             // if we filled up the destination, grab another page.
+                             if (dst_page_vaddr & (PAGE_SIZE - 1)) == 0 {
+                                 // the current vaddr is pointing to a new, empty vaddr; we want to write

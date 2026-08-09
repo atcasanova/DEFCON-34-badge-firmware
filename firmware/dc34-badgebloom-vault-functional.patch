@@ -1,0 +1,596 @@
+diff --git a/src/config.rs b/src/config.rs
+index 2730fd8..5447543 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -261,7 +261,6 @@ impl GlobalConfig {
+             let (enable, duration_sec) = match current_mode {
+                 VaultMode::About => (true, SHORT_TIMEOUT),
+                 VaultMode::ConfirmGene => (true, MEDIUM_TIMEOUT),
+-                VaultMode::ConfirmWallpaper => (true, MEDIUM_TIMEOUT),
+                 VaultMode::FactoryTest => (false, 0),
+                 VaultMode::StandAloneTest => (false, 0),
+                 VaultMode::DefconHelp => (true, SHORT_TIMEOUT),
+@@ -271,10 +270,8 @@ impl GlobalConfig {
+                 VaultMode::Password => (true, MEDIUM_TIMEOUT),
+                 VaultMode::Totp => (true, MEDIUM_TIMEOUT),
+                 VaultMode::GeneScan => (true, LONG_TIMEOUT),
+-                VaultMode::ResponseGene { quantum: _ } => (true, LONG_TIMEOUT),
++                VaultMode::ResponseGene { quantum: _ } => (true, LONG_TIMEOUT),
+                 VaultMode::ShowKey { quantum: _ } => (true, LONG_TIMEOUT),
+-                VaultMode::ShowRepo { quantum: _ } => (true, LONG_TIMEOUT),
+-                VaultMode::Wallpaper => (true, MEDIUM_TIMEOUT),
+                 VaultMode::TokenTour => (true, MEDIUM_TIMEOUT),
+                 VaultMode::Tour => (true, MEDIUM_TIMEOUT),
+             };
+@@ -416,20 +413,6 @@ impl GlobalConfig {
+         .ok();
+     }
+ 
+-    pub fn set_animation_speed(&self, percent: u8) {
+-        xous::send_message(
+-            self.led_server,
+-            xous::Message::new_scalar(
+-                LedManagerOp::JackEyes.to_usize().unwrap(),
+-                3,
+-                percent as usize,
+-                0,
+-                0,
+-            ),
+-        )
+-        .ok();
+-    }
+-
+     pub fn render_gene(&self) {
+         if let Some(gene) = self.gene_cache {
+             gene.send(self.led_server, LedManagerOp::SetGene.to_usize().unwrap());
+diff --git a/src/idlemenu.rs b/src/idlemenu.rs
+index 754ba17..0583cbb 100644
+--- a/src/idlemenu.rs
++++ b/src/idlemenu.rs
+@@ -5,10 +5,19 @@ use crate::ActionOp;
+ use crate::VaultOp;
+ 
+ pub fn create_submenu(vault_conn: xous::CID, actions_conn: xous::CID, menu_mgr: xous::SID) -> MenuMatic {
+-    let mut menu_items = Vec::<MenuItem>::new();
+-
+-    menu_items.push(MenuItem {
+-        name: String::from("Help"),
++    let mut menu_items = Vec::<MenuItem>::new();
++
++    // Keep shutdown first: in developer mode a long rocker hold opens this menu,
++    // so releasing and pressing the rocker once confirms power-off.
++    menu_items.push(MenuItem {
++        name: String::from("Power Off"),
++        action_conn: Some(vault_conn),
++        action_opcode: VaultOp::PowerOff.to_u32().unwrap(),
++        action_payload: MenuPayload::Scalar([0, 0, 0, 0]),
++        close_on_select: true,
++    });
++    menu_items.push(MenuItem {
++        name: String::from("Help"),
+         action_conn: Some(vault_conn),
+         action_opcode: VaultOp::DefconHelp.to_u32().unwrap(),
+         action_payload: MenuPayload::Scalar([0, 0, 0, 0]),
+@@ -35,14 +44,6 @@ pub fn create_submenu(vault_conn: xous::CID, actions_conn: xous::CID, menu_mgr:
+         action_payload: MenuPayload::Scalar([0, 0, 0, 0]),
+         close_on_select: true,
+     });
+-    menu_items.push(MenuItem {
+-        name: String::from("Power Off"),
+-        action_conn: Some(vault_conn),
+-        action_opcode: VaultOp::PowerOff.to_u32().unwrap(),
+-        action_payload: MenuPayload::Scalar([0, 0, 0, 0]),
+-        close_on_select: true,
+-    });
+-
+-    menu_matic(menu_items, "DC34 Badge", Some(menu_mgr), vault_conn, VaultOp::MenuDone.to_usize().unwrap())
++    menu_matic(menu_items, "DC34 Badge", Some(menu_mgr), vault_conn, VaultOp::MenuDone.to_usize().unwrap())
+         .expect("couldn't create MenuMatic manager")
+ }
+diff --git a/src/lightqr.rs b/src/lightqr.rs
+index 805836b..29f68e4 100644
+--- a/src/lightqr.rs
++++ b/src/lightqr.rs
+@@ -8,7 +8,7 @@ use std::io::{Read, Write};
+ 
+ use dc34_api::{DC34_DICT, Haploid};
+ 
+-pub const URI_PREFIX: &str = "dc34light://";
++pub const URI_PREFIX: &str = "DC34LIGHT://";
+ const STORAGE_KEY: &str = "badgebloom.lights.v2";
+ const LEGACY_STORAGE_KEY: &str = "lightstudio.gene";
+ const MAGIC: [u8; 4] = *b"DC34";
+@@ -117,7 +117,11 @@ impl LightQrError {
+ }
+ 
+ pub fn decode_uri(uri: &str) -> Result<LightPattern, LightQrError> {
+-    let encoded = uri.strip_prefix(URI_PREFIX).ok_or(LightQrError::NotLightQr)?;
++    let prefix = uri.get(..URI_PREFIX.len()).ok_or(LightQrError::NotLightQr)?;
++    if !prefix.eq_ignore_ascii_case(URI_PREFIX) {
++        return Err(LightQrError::NotLightQr);
++    }
++    let encoded = &uri[URI_PREFIX.len()..];
+     let record = base45::decode(encoded.as_bytes()).map_err(|_| LightQrError::InvalidBase45)?;
+ 
+     if record.len() != LEGACY_RECORD_LEN && record.len() != RECORD_LEN {
+diff --git a/src/main.rs b/src/main.rs
+index c174ec0..0e46aa9 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -23,7 +23,6 @@ mod idlemenu;
+ mod lightqr;
+ mod tests;
+ mod vendor_commands;
+-mod wallpaper;
+ 
+ use core::sync::atomic::{AtomicBool, Ordering};
+ use std::io::Read;
+@@ -40,10 +39,8 @@ use xous_ipc::Buffer;
+ use crate::actions::ActionOp;
+ use crate::config::{GlobalConfig, read_badgetype_pins};
+ 
+-const ANIMATION_SPEED_MIN: u8 = 25;
+-const ANIMATION_SPEED_MAX: u8 = 200;
+-const ANIMATION_SPEED_STEP: u8 = 25;
+-const ANIMATION_SPEED_DEFAULT: u8 = 100;
++const ROCKER_HOLD_MENU_MS: u64 = 1300;
++const ROCKER_RELEASE_GAP_MS: u64 = 150;
+ 
+ /*
+   k0 hash check correct value: dca9ea49
+@@ -64,13 +61,10 @@ pub enum VaultMode {
+     Idle,
+     IdleDevMode,
+     ShowKey { quantum: u32 },
+-    ShowRepo { quantum: u32 },
+     ResponseGene { quantum: u32 },
+     // state for confirming the current pattern
+     ConfirmGene,
+-    ConfirmWallpaper,
+     GeneScan,
+-    Wallpaper,
+     FactoryTest,
+     StandAloneTest,
+     Tour,
+@@ -87,7 +81,6 @@ impl VaultMode {
+         match self {
+             VaultMode::About => true,
+             VaultMode::ConfirmGene => false,
+-            VaultMode::ConfirmWallpaper => false,
+             VaultMode::FactoryTest => true,
+             VaultMode::StandAloneTest => true,
+             VaultMode::DefconHelp => true,
+@@ -97,10 +90,8 @@ impl VaultMode {
+             VaultMode::Password => false,
+             VaultMode::Totp => true,
+             VaultMode::GeneScan => true,
+-            VaultMode::Wallpaper => false,
+             VaultMode::ResponseGene { quantum: _ } => true,
+             VaultMode::ShowKey { quantum: _ } => true,
+-            VaultMode::ShowRepo { quantum: _ } => true,
+             VaultMode::TokenTour => false,
+             VaultMode::Tour => false,
+         }
+@@ -322,10 +313,9 @@ fn main() -> ! {
+     let mut k_last = '\u{0000}';
+     let mut skip_one_key = false;
+     let mut pending_light_pattern: Option<lightqr::LightPattern> = None;
+-    let mut animation_speed_percent = ANIMATION_SPEED_DEFAULT;
+-    let mut image_transfer = wallpaper::ImageTransfer::new();
+-    let mut pending_wallpaper: Option<[u32; wallpaper::BITMAP_WORDS]> = None;
+-    let mut previous_wallpaper: Option<[u32; wallpaper::BITMAP_WORDS]> = None;
++    let mut rocker_press_started_ms: Option<u64> = None;
++    let mut rocker_last_repeat_ms = 0u64;
++    let mut rocker_menu_latched = false;
+     loop {
+         global_config.lock().unwrap().update_power_state(mode.lock().unwrap().clone());
+         let msg = xous::receive_message(sid).unwrap();
+@@ -378,20 +368,36 @@ fn main() -> ! {
+                 }
+                 let mode_now = *mode.lock().unwrap();
+                 let k = char::from_u32(k1 as u32).unwrap_or('\u{0000}');
+-                if !menu_active && mode_now == VaultMode::IdleDevMode && matches!(k, '↑' | '↓' | '∴') {
+-                    animation_speed_percent = match k {
+-                        '↑' => animation_speed_percent
+-                            .saturating_add(ANIMATION_SPEED_STEP)
+-                            .min(ANIMATION_SPEED_MAX),
+-                        '↓' => animation_speed_percent
+-                            .saturating_sub(ANIMATION_SPEED_STEP)
+-                            .max(ANIMATION_SPEED_MIN),
+-                        '∴' => ANIMATION_SPEED_DEFAULT,
+-                        _ => animation_speed_percent,
+-                    };
+-                    global_config.lock().unwrap().set_animation_speed(animation_speed_percent);
+-                    vault_ui.set_animation_speed(animation_speed_percent);
+-                    vault_ui.redraw();
++
++                // Once a long rocker hold opens the menu, discard only the remaining key-repeat
++                // events from that same physical press. A later press (after the release gap) is
++                // delivered normally so it can select the highlighted menu item.
++                if rocker_menu_latched && k == '∴' {
++                    let now = tt.elapsed_ms();
++                    if now.saturating_sub(rocker_last_repeat_ms) <= ROCKER_RELEASE_GAP_MS {
++                        rocker_last_repeat_ms = now;
++                        continue;
++                    }
++                    rocker_menu_latched = false;
++                    rocker_press_started_ms = None;
++                } else if k != '∴' {
++                    rocker_press_started_ms = None;
++                    rocker_menu_latched = false;
++                }
++
++                if !menu_active && mode_now == VaultMode::IdleDevMode && k == '∴' {
++                    let now = tt.elapsed_ms();
++                    if now.saturating_sub(rocker_last_repeat_ms) > ROCKER_RELEASE_GAP_MS {
++                        rocker_press_started_ms = Some(now);
++                    }
++                    rocker_last_repeat_ms = now;
++
++                    if now.saturating_sub(rocker_press_started_ms.unwrap_or(now)) >= ROCKER_HOLD_MENU_MS {
++                        animate.store(false, Ordering::SeqCst);
++                        idle_menu_mgr.redraw();
++                        menu_active = true;
++                        rocker_menu_latched = true;
++                    }
+                     continue;
+                 }
+                 if k == '🔽' || k == '🔼' {
+@@ -417,7 +423,7 @@ fn main() -> ! {
+                 if menu_active {
+                     if matches!(mode_now, VaultMode::Tour) {
+                         tour_menu_mgr.key_press(k);
+-                    } else if matches!(mode_now, VaultMode::ConfirmGene | VaultMode::ConfirmWallpaper) {
++                    } else if matches!(mode_now, VaultMode::ConfirmGene) {
+                         gene_menu_mgr.key_press(k);
+                     } else if matches!(mode_now, VaultMode::Idle)
+                         || matches!(mode_now, VaultMode::IdleDevMode)
+@@ -436,7 +442,7 @@ fn main() -> ! {
+                             animate.store(false, Ordering::SeqCst);
+                             if matches!(mode_now, VaultMode::Tour) {
+                                 tour_menu_mgr.redraw();
+-                            } else if matches!(mode_now, VaultMode::ConfirmGene | VaultMode::ConfirmWallpaper) {
++                            } else if matches!(mode_now, VaultMode::ConfirmGene) {
+                                 gene_menu_mgr.redraw();
+                             } else if matches!(mode_now, VaultMode::Idle)
+                                 || matches!(mode_now, VaultMode::IdleDevMode)
+@@ -633,7 +639,6 @@ fn main() -> ! {
+                 .ok();
+             }
+             Some(VaultOp::AbortQr) => {
+-                image_transfer.reset();
+                 if global_config.lock().unwrap().is_developer() {
+                     *mode.lock().unwrap() = VaultMode::IdleDevMode;
+                     animate.store(VaultMode::IdleDevMode.should_animate(), Ordering::SeqCst);
+@@ -659,71 +664,6 @@ fn main() -> ! {
+                 log::info!("mode: {:?}, s: {}", mode_now, s.s);
+                 skip_one_key = false;
+ 
+-                match image_transfer.accept_uri(&s.s) {
+-                    Ok(wallpaper::FrameStatus::Progress { frame, received, total, duplicate }) => {
+-                        log::info!(
+-                            "Wallpaper frame {} imported: {}/{} duplicate={}",
+-                            frame + 1,
+-                            received,
+-                            total,
+-                            duplicate
+-                        );
+-                        *mode.lock().unwrap() = VaultMode::GeneScan;
+-                        animate.store(false, Ordering::SeqCst);
+-                        vault_ui.image_scan_progress(frame, received, total, duplicate);
+-                        tt.sleep_ms(550).ok();
+-                        vault_ui.camera_transition();
+-                        xous::send_message(
+-                            actions_conn,
+-                            xous::Message::new_blocking_scalar(
+-                                ActionOp::AcquireQr.to_usize().unwrap(),
+-                                0,
+-                                0,
+-                                0,
+-                                0,
+-                            ),
+-                        )
+-                        .ok();
+-                        continue;
+-                    }
+-                    Ok(wallpaper::FrameStatus::Complete(bitmap)) => {
+-                        log::info!("Wallpaper transfer complete; presenting preview");
+-                        previous_wallpaper = vault_ui.user_bitmap;
+-                        vault_ui.user_bitmap = Some(bitmap);
+-                        pending_wallpaper = Some(bitmap);
+-                        *mode.lock().unwrap() = VaultMode::ConfirmWallpaper;
+-                        animate.store(false, Ordering::SeqCst);
+-
+-                        // Reuse the stock Keep/Revert menu as the persistence boundary.
+-                        std::thread::spawn(move || {
+-                            std::thread::sleep(std::time::Duration::from_millis(500));
+-                            xous::send_message(
+-                                conn,
+-                                xous::Message::new_scalar(
+-                                    VaultOp::KeyPress.to_usize().unwrap(),
+-                                    0x2234usize,
+-                                    0,
+-                                    0,
+-                                    0,
+-                                ),
+-                            )
+-                            .ok();
+-                        });
+-                        continue;
+-                    }
+-                    Err(wallpaper::WallpaperQrError::NotWallpaperQr) => (),
+-                    Err(e) => {
+-                        log::warn!("Invalid BadgeBloom wallpaper QR: {:?}", e);
+-                        image_transfer.reset();
+-                        animate.store(false, Ordering::SeqCst);
+-                        modals.show_notification(e.user_message(), None).ok();
+-                        *mode.lock().unwrap() = VaultMode::IdleDevMode;
+-                        animate.store(mode.lock().unwrap().should_animate(), Ordering::SeqCst);
+-                        vault_ui.redraw();
+-                        continue;
+-                    }
+-                }
+-
+                 // DC34 Light Studio uses an open, checksummed QR format. This is deliberately
+                 // separate from the encrypted conference exchange protocol: loading this firmware
+                 // puts the device into developer mode and erases the provisioned exchange key.
+@@ -1088,17 +1028,7 @@ fn main() -> ! {
+                 vault_ui.redraw();
+             }
+             Some(VaultOp::KeepGene) => {
+-                if let Some(bitmap) = pending_wallpaper {
+-                    if wallpaper::save_wallpaper(&bitmap) {
+-                        pending_wallpaper = None;
+-                        previous_wallpaper = None;
+-                        *mode.lock().unwrap() = VaultMode::IdleDevMode;
+-                    } else {
+-                        log::error!("Failed to persist BadgeBloom wallpaper");
+-                        modals.show_notification("Failed to save wallpaper", None).ok();
+-                        *mode.lock().unwrap() = VaultMode::ConfirmWallpaper;
+-                    }
+-                } else if let Some(pattern) = pending_light_pattern {
++                if let Some(pattern) = pending_light_pattern {
+                     if lightqr::save_pattern(pattern) {
+                         pending_light_pattern = None;
+                         *mode.lock().unwrap() = VaultMode::IdleDevMode;
+@@ -1113,11 +1043,14 @@ fn main() -> ! {
+                     }
+                     *mode.lock().unwrap() = VaultMode::Idle;
+                 }
++                // Close locally as well as through MenuDone. This removes a race where
++                // an immediate camera-button press can still be routed to the old menu.
++                menu_active = false;
++                animate.store(mode.lock().unwrap().should_animate(), Ordering::SeqCst);
++                vault_ui.redraw();
+             }
+             Some(VaultOp::RevertGene) => {
+-                if pending_wallpaper.take().is_some() {
+-                    vault_ui.user_bitmap = previous_wallpaper.take();
+-                } else if pending_light_pattern.take().is_some() {
++                if pending_light_pattern.take().is_some() {
+                     if let Some(pattern) = lightqr::load_pattern() {
+                         let config = global_config.lock().unwrap();
+                         config.force_pattern(pattern.gene);
+@@ -1136,6 +1069,9 @@ fn main() -> ! {
+                 } else {
+                     VaultMode::Idle
+                 };
++                menu_active = false;
++                animate.store(mode.lock().unwrap().should_animate(), Ordering::SeqCst);
++                vault_ui.redraw();
+             }
+             Some(VaultOp::TokenMode) => {
+                 *mode.lock().unwrap() = VaultMode::Password;
+diff --git a/src/ux.rs b/src/ux.rs
+index d7847f0..680111c 100644
+--- a/src/ux.rs
++++ b/src/ux.rs
+@@ -17,7 +17,6 @@ use crate::action_handler::SelectedEntry;
+ use crate::config::AttachState;
+ use crate::*;
+ 
+-const BADGEBLOOM_REPOSITORY: &str = "https://github.com/atcasanova/DEFCON-34-badge-firmware";
+ const FAST_SCROLL_DELAY_MS: u64 = 1300;
+ const KEYUP_DELAY_MS: u64 = 100;
+ /// How many elements to skip through on fast scroll
+@@ -538,7 +537,6 @@ pub struct VaultUi {
+     edge: bool,
+     last_mode: VaultMode,
+     pub bio_loaded: bool,
+-    animation_speed_percent: u8,
+ }
+ 
+ impl VaultUi {
+@@ -603,7 +601,6 @@ impl VaultUi {
+             edge: false,
+             last_mode: VaultMode::FactoryTest,
+             bio_loaded: false,
+-            animation_speed_percent: 100,
+         }
+     }
+ 
+@@ -862,40 +859,6 @@ impl VaultUi {
+                     self.batt_polled = false;
+                 }
+ 
+-                // indicate developer mode
+-                if mode_at_entry == VaultMode::IdleDevMode {
+-                    let mut tv = TextView::new(
+-                        Gid::dummy(),
+-                        TextBounds::CenteredTop(Rectangle::new(
+-                            Point::new(0, 127 - 12),
+-                            Point::new(128, 128),
+-                        )),
+-                    );
+-                    tv.invert = true;
+-                    tv.margin = Point::new(1, 1);
+-                    tv.style = GlyphStyle::Bold;
+-                    tv.draw_border = false;
+-                    write!(tv, "DEV MODE").ok();
+-                    self.gfx.draw_textview(&mut tv).ok();
+-
+-                    let mut speed = TextView::new(
+-                        Gid::dummy(),
+-                        TextBounds::CenteredTop(Rectangle::new(Point::new(0, 0), Point::new(127, 12))),
+-                    );
+-                    speed.invert = true;
+-                    speed.margin = Point::new(1, 1);
+-                    speed.style = GlyphStyle::Small;
+-                    speed.draw_border = false;
+-                    speed.clear_area = false;
+-                    write!(
+-                        speed,
+-                        "SPEED {}.{:02}x",
+-                        self.animation_speed_percent / 100,
+-                        self.animation_speed_percent % 100
+-                    )
+-                    .ok();
+-                    self.gfx.draw_textview(&mut speed).ok();
+-                }
+                 // indicate BIO hacks
+                 if self.bio_loaded && (now / 1000) % 2 == 0 {
+                     let mut tv = TextView::new(
+@@ -938,16 +901,7 @@ impl VaultUi {
+                     _ => {}
+                 }
+             }
+-            VaultMode::Wallpaper | VaultMode::ConfirmWallpaper => {
+-                self.clear_area();
+-                if let Some(bitmap) = self.user_bitmap.as_ref() {
+-                    self.gfx.bitmap_diffusion(bitmap, None, None).ok();
+-                } else {
+-                    self.gfx.bitmap(&bitmaps::dc_logo::BITMAP, None, None).ok();
+-                }
+-            }
+             VaultMode::ShowKey { quantum }
+-            | VaultMode::ShowRepo { quantum }
+             | VaultMode::ResponseGene { quantum } => {
+                 if let Some(code) = &self.qr_override {
+                     if quantum & 7 == 0 {
+@@ -960,7 +914,6 @@ impl VaultUi {
+                     if quantum & 7 == 6 {
+                         let (width, label) = match mode_at_entry {
+                             VaultMode::ShowKey { .. } => (14, "NCE"),
+-                            VaultMode::ShowRepo { .. } => (17, "SRC"),
+                             _ => (17, "DAT"),
+                         };
+                         let mut tv = TextView::new(
+@@ -979,8 +932,6 @@ impl VaultUi {
+                     }
+                     if matches!(mode_at_entry, VaultMode::ShowKey { .. }) {
+                         *self.mode.lock().unwrap() = VaultMode::ShowKey { quantum: quantum + 1 }
+-                    } else if matches!(mode_at_entry, VaultMode::ShowRepo { .. }) {
+-                        *self.mode.lock().unwrap() = VaultMode::ShowRepo { quantum: quantum + 1 }
+                     } else if matches!(mode_at_entry, VaultMode::ResponseGene { .. }) {
+                         *self.mode.lock().unwrap() = VaultMode::ResponseGene { quantum: quantum + 1 }
+                     }
+@@ -1700,8 +1651,14 @@ impl VaultUi {
+                 self.totp_code = None;
+                 Some(k)
+             }
+-            VaultMode::Idle => match k {
+-                '←' | '→' => {
++            VaultMode::Idle | VaultMode::IdleDevMode => match k {
++                // Keep the original BadgeBloom scan button as well as the stock middle
++                // camera button. The left path was already proven on physical hardware.
++                '←' | '🔥' => {
++                    *self.mode.lock().unwrap() = VaultMode::GeneScan;
++                    Some('🔥')
++                }
++                '→' => {
+                     if let Some(config) = self.global_config.as_mut() {
+                         let mut c = config.lock().unwrap();
+                         c.lock_rate(); // lock in the mutation rate at this point in time
+@@ -1723,47 +1680,8 @@ impl VaultUi {
+                     }
+                     None
+                 }
+-                '🔥' => {
+-                    *self.mode.lock().unwrap() = VaultMode::GeneScan;
+-                    Some(k)
+-                }
+-                _ => Some(k),
+-            },
+-            VaultMode::IdleDevMode => match k {
+-                '←' => {
+-                    *self.mode.lock().unwrap() = VaultMode::GeneScan;
+-                    // The top-level camera path is keyed on the fire symbol. Remap only in
+-                    // developer idle mode; factory tests, menus, and update mode are untouched.
+-                    Some('🔥')
+-                }
+-                '🔥' => {
+-                    *self.mode.lock().unwrap() = VaultMode::Wallpaper;
+-                    None
+-                }
+-                '→' => {
+-                    match QrCode::with_error_correction_level(
+-                        BADGEBLOOM_REPOSITORY.as_bytes(),
+-                        qrcode::EcLevel::M,
+-                    ) {
+-                        Ok(code) => {
+-                            self.qr_override = Some(code);
+-                            *self.mode.lock().unwrap() = VaultMode::ShowRepo { quantum: 0 };
+-                        }
+-                        Err(e) => log::error!("Couldn't render BadgeBloom repository QR: {:?}", e),
+-                    }
+-                    None
+-                }
+                 _ => Some(k),
+             },
+-            VaultMode::Wallpaper => {
+-                *self.mode.lock().unwrap() = VaultMode::IdleDevMode;
+-                None
+-            }
+-            VaultMode::ShowRepo { quantum: _ } => {
+-                self.qr_override.take();
+-                *self.mode.lock().unwrap() = VaultMode::IdleDevMode;
+-                None
+-            }
+             VaultMode::ShowKey { quantum: _ } => {
+                 match k {
+                     '🔥' => {
+@@ -1779,7 +1697,7 @@ impl VaultUi {
+                 }
+             }
+             // this is the next state of the recipient after showing the key
+-            VaultMode::ConfirmGene | VaultMode::ConfirmWallpaper => Some(k),
++            VaultMode::ConfirmGene => Some(k),
+             // this is the state of the donor in response to query
+             VaultMode::ResponseGene { quantum: _ } => {
+                 self.global_config.as_mut().unwrap().lock().unwrap().clear_nonces();
+@@ -1814,35 +1732,6 @@ impl VaultUi {
+         self.redraw();
+     }
+ 
+-    pub(crate) fn image_scan_progress(
+-        &mut self,
+-        frame: usize,
+-        received: usize,
+-        total: usize,
+-        duplicate: bool,
+-    ) {
+-        self.gfx.clear().ok();
+-        let mut tv = TextView::new(
+-            Gid::dummy(),
+-            TextBounds::CenteredTop(Rectangle::new(Point::new(0, 28), Point::new(127, 112))),
+-        );
+-        tv.invert = true;
+-        tv.margin = Point::new(2, 2);
+-        tv.style = GlyphStyle::Bold;
+-        tv.draw_border = false;
+-        if duplicate {
+-            write!(tv, "FRAME {} ALREADY\n{} / {}\nNEXT QR", frame + 1, received, total).ok();
+-        } else {
+-            write!(tv, "FRAME {} DONE\n{} / {}\nNEXT QR", frame + 1, received, total).ok();
+-        }
+-        self.gfx.draw_textview(&mut tv).ok();
+-        self.gfx.flush().ok();
+-    }
+-
+-    pub(crate) fn set_animation_speed(&mut self, percent: u8) {
+-        self.animation_speed_percent = percent;
+-    }
+-
+     pub(crate) fn filter(&mut self, criteria: &String) {
+         self.filter = criteria.to_owned();
+         // only filter passwords in this implementation

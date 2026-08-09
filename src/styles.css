@@ -73,6 +73,9 @@ legend { float: left; width: 100%; margin: 0 0 28px; padding: 0; font-size: 25px
 .color-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; clear: both; }
 .color-field { border: 1px solid var(--line); padding: 13px; color: var(--muted); font: 400 11px "DM Mono", monospace; }
 .color-field input { display: block; width: 100%; height: 62px; margin-top: 10px; padding: 0; border: 0; background: none; cursor: pointer; }
+.rgb-triplet { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
+.rgb-triplet label { color: #7f877b; font-size: 9px; }
+.rgb-triplet input { box-sizing: border-box; width: 100%; height: auto; margin-top: 4px; padding: 7px 3px; border: 1px solid var(--line); color: var(--ink); background: #0d110d; cursor: text; font: 10px "DM Mono", monospace; text-align: center; }
 .select-field { display: block; clear: both; color: var(--muted); font: 400 11px "DM Mono", monospace; }
 .select-field span { display: block; margin-bottom: 9px; }
 .select-field select { width: 100%; border: 1px solid var(--line); border-radius: 0; padding: 11px; color: var(--ink); background: #101410; }
@@ -108,43 +111,6 @@ dl { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 0; f
 dt { color: #7e877a; } dd { margin: 0; color: #c2c8be; }
 .transfer-status { min-height: 18px; color: var(--acid); margin: 18px 24px 0; font: 10px "DM Mono", monospace; }
 
-.wallpaper-heading { display: grid; grid-template-columns: 1.1fr .9fr; gap: 24px; align-items: end; border-top: 1px solid var(--line); padding: 105px 0 58px; }
-.wallpaper-heading .eyebrow { grid-column: 1 / -1; margin-bottom: 8px; }
-.wallpaper-heading h2 { margin: 0; font-size: clamp(42px, 6vw, 84px); line-height: .92; letter-spacing: -.065em; }
-.wallpaper-heading h2 em { color: var(--mint); font-style: normal; }
-.wallpaper-heading > p:last-child { max-width: 530px; margin: 0 0 8px; color: #a7ada2; line-height: 1.65; }
-
-.wallpaper-workspace { display: grid; grid-template-columns: minmax(340px, .8fr) minmax(590px, 1.45fr); gap: 14px; align-items: stretch; }
-.wallpaper-editor-body { padding: 24px; }
-.upload-field { display: block; border: 1px dashed #596356; padding: 20px; cursor: pointer; transition: .18s ease; }
-.upload-field:hover { border-color: var(--acid); background: rgb(208 255 98 / .035); }
-.upload-field input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.upload-title { display: block; margin-bottom: 7px; color: var(--acid); font-weight: 650; }
-.upload-field > span:last-of-type { color: var(--muted); font: 10px/1.5 "DM Mono", monospace; }
-.wallpaper-preview-shell { width: min(100%, 440px); aspect-ratio: 1; margin: 24px auto; position: relative; display: grid; place-items: center; overflow: hidden; border: 1px solid #4c5549; background: #f3f1e8; }
-.wallpaper-preview-shell canvas { width: 100%; height: 100%; image-rendering: pixelated; }
-.wallpaper-preview-shell > span, .wallpaper-qr-shell > span { position: absolute; color: #4f584c; text-align: center; text-transform: uppercase; font: 600 11px/1.6 "DM Mono", monospace; letter-spacing: .08em; pointer-events: none; }
-.wallpaper-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.wallpaper-controls > label > span:first-child { display: block; margin-bottom: 9px; color: #b7bdb2; font: 11px "DM Mono", monospace; }
-.wallpaper-controls select { width: 100%; border: 1px solid var(--line); border-radius: 0; padding: 11px; color: var(--ink); background: #101410; }
-.wallpaper-threshold, .wallpaper-invert { grid-column: 1 / -1; }
-.wallpaper-threshold { margin-top: 8px; }
-.wallpaper-invert { margin-top: 4px; }
-
-.wallpaper-transfer { display: grid; grid-template-columns: minmax(340px, .9fr) minmax(310px, 1fr); grid-template-rows: auto 1fr; }
-.wallpaper-transfer > .panel-kicker { grid-column: 1 / -1; }
-.wallpaper-qr-area { padding: 18px 24px 24px; border-right: 1px solid var(--line); }
-.wallpaper-qr-shell { width: 100%; margin: 0; position: relative; }
-.frame-meter { display: flex; justify-content: space-between; border: 1px solid var(--line); border-top: 0; padding: 12px 14px; color: var(--acid); font: 10px "DM Mono", monospace; letter-spacing: .08em; }
-.wallpaper-transfer-copy { padding: 24px 28px 22px; }
-.wallpaper-transfer-copy h3 { margin: 0 0 12px; font-size: 27px; line-height: 1; letter-spacing: -.045em; }
-.wallpaper-transfer-copy > p { color: #a7ada2; font-size: 13px; line-height: 1.65; }
-.wallpaper-transfer-copy ol { color: #a7ada2; margin: 18px 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
-.wallpaper-transfer-copy li + li { margin-top: 8px; }
-.wallpaper-qr-area .frame-hold-control { margin: 22px 2px 0; }
-.carousel-buttons { grid-template-columns: 1fr 1fr; margin: 0; }
-.wallpaper-transfer-copy .transfer-status { margin-inline: 0; }
-
 .button-map { margin: 14px 0 110px; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); }
 .button-map span { padding: 18px; color: #8f978b; text-align: center; font: 10px "DM Mono", monospace; letter-spacing: .06em; }
 .button-map span + span { border-left: 1px solid var(--line); }
@@ -156,10 +122,6 @@ footer { border-top: 1px solid var(--line); min-height: 105px; display: flex; ju
   .transfer-panel { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(300px, 420px) 1fr; align-items: start; }
   .transfer-panel .panel-kicker { grid-column: 1 / -1; }
   .transfer-panel .qr-shell { grid-row: 2 / span 6; }
-  .wallpaper-workspace { grid-template-columns: 1fr; }
-  .wallpaper-editor-body { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(330px, 1fr); gap: 24px; }
-  .upload-field { grid-column: 1 / -1; }
-  .wallpaper-preview-shell { margin: 0; }
 }
 @media (max-width: 760px) {
   .site-header, main, footer { width: min(100% - 24px, 1480px); }
@@ -169,12 +131,6 @@ footer { border-top: 1px solid var(--line); min-height: 105px; display: flex; ju
   .preview-panel { min-height: 600px; }
   .badge-stage { height: 455px; transform: scale(.88); margin: -15px; }
   .toggle-grid { grid-template-columns: 1fr; }
-  .wallpaper-heading { grid-template-columns: 1fr; padding-top: 75px; }
-  .wallpaper-heading .eyebrow { grid-column: auto; }
-  .wallpaper-editor-body { display: block; }
-  .wallpaper-preview-shell { margin-block: 20px; }
-  .wallpaper-transfer { display: block; }
-  .wallpaper-qr-area { border-right: 0; border-bottom: 1px solid var(--line); }
   .button-map { grid-template-columns: 1fr; }
   .button-map span + span { border-left: 0; border-top: 1px solid var(--line); }
   footer { gap: 20px; font-size: 8px; }
