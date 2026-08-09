@@ -1598,10 +1598,39 @@ index 3a38f16..6450898 100644
      /// is to briefly stop rendering while the device goes between clock modes. The routine
      /// needs to be infallible, so timeouts are used in case the BIO is in a bad state - otherwise
 diff --git a/src/leds.rs b/src/leds.rs
-index 00319a9..470b014 100644
+index 00319a9..f167aca 100644
 --- a/src/leds.rs
 +++ b/src/leds.rs
-@@ -97,7 +97,8 @@ fn leds() {
+@@ -82,13 +82,21 @@ fn leds() {
+                     lightgenes.express();
+                 }
+             }
+-            LedManagerOp::SetGene => {
+-                if let Some(mem) = msg_opt.as_ref().unwrap().body.memory_message() {
+-                    lightgenes.gene = Some(Diploid::receive(mem));
+-                    log::info!("Received gene {:?}", lightgenes.gene);
+-                    lightgenes.express();
+-                }
+-            }
++            LedManagerOp::SetGene => {
++                if let Some(mem) = msg_opt.as_ref().unwrap().body.memory_message() {
++                    let gene = Diploid::receive(mem);
++                    let exact_phenotype = gene.0[0].serialize() == gene.0[1].serialize();
++                    lightgenes.gene = Some(gene);
++                    log::info!("Received gene {:?}", lightgenes.gene);
++                    if exact_phenotype {
++                        // BadgeBloom sends two identical strands to request an exact
++                        // native phenotype while retaining the stock SetGene IPC path.
++                        lightgenes.force(gene.0[0]);
++                    } else {
++                        lightgenes.express();
++                    }
++                }
++            }
+             LedManagerOp::JackEyes => {
+                 if let Some(scalar) = msg_opt.as_ref().unwrap().body.scalar_message() {
+                     match scalar.arg1 {
+@@ -97,7 +105,8 @@ fn leds() {
                              scalar.arg3 as u32,
                              scalar.arg4 as u32,
                          ),

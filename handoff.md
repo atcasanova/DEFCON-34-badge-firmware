@@ -4,7 +4,7 @@ Read this before flashing anything.
 
 The physical badge has permanently entered **DEV MODE**. This is expected after installing developer-signed firmware: the transition erases the provisioned `k0` light-exchange secret. Reinstalling stock firmware does not restore that secret. The stock exchange screens can be restored, but authenticated exchange with factory badges cannot be recovered.
 
-The published **v1.3.1 firmware is known bad** on this badge: it stops at the boot logo near 50%. A corrected loader has already reached the application on real hardware. The 2026-08-09 ring-fix candidate was flashed and published at the owner's request without waiting for a full physical acceptance test.
+The published **v1.3.1 firmware is known bad** on this badge: it stops at the boot logo near 50%. A corrected loader has already reached the application on real hardware. **v1.4.0 is also superseded:** its QR changed the eyes but still did not change the perimeter LEDs, and the rocker hold never opened the menu.
 
 ## Current intended behavior
 
@@ -25,15 +25,23 @@ Custom wallpaper transfer was removed after physical testing showed that the bad
 - The badge-side wallpaper, repository-QR, and wallpaper persistence flows are removed.
 - The permanent `DEV MODE` overlay is removed; developer mode remains a device state, not an always-on application label.
 - Both the previously proven left-button path and the stock middle camera button open the light scanner; right retains the stock nonce QR.
-- A long rocker hold opens the idle menu; the same physical hold is latched so it cannot immediately activate the selected item.
+- A long rocker hold opens the idle menu; the Xous keyboard service now permits Select repeats so the application can actually detect that hold. The same physical hold is latched so it cannot immediately activate the selected item.
 - **Power Off** is the first idle-menu item.
 - Rocker up/down no longer changes animation speed.
 - The QR's encoded speed remains active and is kept in the webapp.
-- The ring force command now uses the same complete FIFO sequence as the stock `SetGene` path, with the required BIO write bit and clear boundaries.
+- Custom rings no longer use the ineffective scalar `Force` IPC. They use the stock memory-backed `SetGene` IPC with two identical strands marking an exact nine-byte phenotype.
 - Custom-eye startup values fail dark instead of defaulting to white at full brightness.
 - Keep/Revert closes its menu state immediately, preventing a fast middle-button camera press from being routed back to the stale confirmation menu.
 - The webapp exposes stock-follow, off, steady, human blink, alternating wink, and breathe eye behaviors under **Eye animation**.
 - Both firmware components and the production webapp build successfully; the matched UF2 set was flashed and byte-verified on the BAOCHIP volume.
+
+Flashed `v1.4.1` SetGene/rocker candidate:
+
+```text
+loader.uf2  356352 bytes  b112d47056ec92b90b7cdfa602f7c7cac27cb3a39f1604f5f1510d3ff04e4298
+xous.uf2   6358528 bytes  f3c6142e4e8216e2429920dd65f047f6f778ddcccdcd2ce20368197db5c41b7f
+swap.uf2   2368000 bytes  24518e35b9be4965e242a21c773254568f6fc2a132ed861c72f0776988652daa
+```
 
 ## Boot fix confirmed on hardware (2026-08-09)
 

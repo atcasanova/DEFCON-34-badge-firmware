@@ -1,0 +1,23 @@
+diff --git a/services/bao1x-hal-service/src/servers/keyboard.rs b/services/bao1x-hal-service/src/servers/keyboard.rs
+index d199f131..8afebaad 100644
+--- a/services/bao1x-hal-service/src/servers/keyboard.rs
++++ b/services/bao1x-hal-service/src/servers/keyboard.rs
+@@ -86,11 +86,14 @@ impl KeyTracker {
+         }
+     }
+ 
+-    /// This is a filter that causes some keys to not be repeatable. In particular,
+-    /// we don't want to trigger on the middle menu button or the "action" button if they
+-    /// are held down - we jut want to repeat on the left/right/up/down keys
++    /// Repeat navigation keys and Select. BadgeBloom consumes Select repeats in idle
++    /// mode to distinguish a long rocker hold before opening the power menu.
+     pub fn is_repeating(&self, key: KeyPress) -> bool {
+-        key == KeyPress::Left || key == KeyPress::Right || key == KeyPress::Up || key == KeyPress::Down
++        key == KeyPress::Left
++            || key == KeyPress::Right
++            || key == KeyPress::Up
++            || key == KeyPress::Down
++            || key == KeyPress::Select
+     }
+ 
+     /// Processes the current keys pressed, at the current time stamp

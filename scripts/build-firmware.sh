@@ -17,6 +17,7 @@ VAULT_FUNCTIONAL_PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-vault-functio
 CONSOLE_FUNCTIONAL_PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-console-functional.patch"
 DIAGNOSTIC_LOADER_PATCH_FILE="${REPO_ROOT}/firmware/dc34-diagnostic-loader.patch"
 XOUS_SWAP_PATCH_FILE="${REPO_ROOT}/firmware/xous-inis-nocopy-loader.patch"
+XOUS_ROCKER_PATCH_FILE="${REPO_ROOT}/firmware/xous-rocker-hold.patch"
 DIAGNOSTIC_LOADER="${BADGEBLOOM_DIAGNOSTIC_LOADER:-0}"
 
 if [[ "${DIAGNOSTIC_LOADER}" != 0 && "${DIAGNOSTIC_LOADER}" != 1 ]]; then
@@ -41,7 +42,8 @@ for patch_file in \
   "${CONSOLE_PATCH_FILE}" \
   "${VAULT_FUNCTIONAL_PATCH_FILE}" \
   "${CONSOLE_FUNCTIONAL_PATCH_FILE}" \
-  "${XOUS_SWAP_PATCH_FILE}"; do
+  "${XOUS_SWAP_PATCH_FILE}" \
+  "${XOUS_ROCKER_PATCH_FILE}"; do
   if [[ ! -f "${patch_file}" ]]; then
     echo "Firmware patch not found: ${patch_file}" >&2
     exit 1
@@ -101,6 +103,8 @@ git -C "${BUILD_ROOT}/dc34-vault" apply --check "${VAULT_FUNCTIONAL_PATCH_FILE}"
 git -C "${BUILD_ROOT}/dc34-vault" apply "${VAULT_FUNCTIONAL_PATCH_FILE}"
 git -C "${BUILD_ROOT}/xous-core" apply --check "${XOUS_SWAP_PATCH_FILE}"
 git -C "${BUILD_ROOT}/xous-core" apply "${XOUS_SWAP_PATCH_FILE}"
+git -C "${BUILD_ROOT}/xous-core" apply --check "${XOUS_ROCKER_PATCH_FILE}"
+git -C "${BUILD_ROOT}/xous-core" apply "${XOUS_ROCKER_PATCH_FILE}"
 
 if [[ "${DIAGNOSTIC_LOADER}" == 1 ]]; then
   echo "==> Applying on-screen early-boot diagnostics"
@@ -134,8 +138,12 @@ grep -Fq "*mrna as u32 | 0x4000_0000" "${BUILD_ROOT}/dc34-console/src/bio/lightg
   echo "Forced ring pattern is missing the BIO write tag" >&2
   exit 1
 }
-grep -Fq "self.express_phenotype(phenotype)" "${BUILD_ROOT}/dc34-console/src/bio/lightgenes/mod.rs" || {
-  echo "Force is not routed through the stock phenotype sender" >&2
+grep -Fq "Diploid([pattern, pattern]).send(self.led_server, LedManagerOp::SetGene" "${BUILD_ROOT}/dc34-vault/src/config.rs" || {
+  echo "Custom ring pattern is not using the stock SetGene transport" >&2
+  exit 1
+}
+grep -Fq "let exact_phenotype = gene.0[0].serialize() == gene.0[1].serialize()" "${BUILD_ROOT}/dc34-console/src/leds.rs" || {
+  echo "Console is missing the exact custom phenotype marker" >&2
   exit 1
 }
 if grep -Fq "animation_speed_percent" "${LIGHTGENES_C}"; then
@@ -206,6 +214,7 @@ done
   echo "Vault patch SHA-256: $(sha256sum "${VAULT_PATCH_FILE}" | cut -d' ' -f1)"
   echo "Vault functional patch SHA-256: $(sha256sum "${VAULT_FUNCTIONAL_PATCH_FILE}" | cut -d' ' -f1)"
   echo "Xous IniS NOCOPY patch SHA-256: $(sha256sum "${XOUS_SWAP_PATCH_FILE}" | cut -d' ' -f1)"
+  echo "Xous rocker hold patch SHA-256: $(sha256sum "${XOUS_ROCKER_PATCH_FILE}" | cut -d' ' -f1)"
   echo "Diagnostic loader: ${DIAGNOSTIC_LOADER}"
   if [[ "${DIAGNOSTIC_LOADER}" == 1 ]]; then
     echo "Diagnostic loader patch SHA-256: $(sha256sum "${DIAGNOSTIC_LOADER_PATCH_FILE}" | cut -d' ' -f1)"

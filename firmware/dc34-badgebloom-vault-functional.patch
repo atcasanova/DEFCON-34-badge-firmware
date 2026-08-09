@@ -1,5 +1,5 @@
 diff --git a/src/config.rs b/src/config.rs
-index 2730fd8..5447543 100644
+index 2730fd8..d7b0030 100644
 --- a/src/config.rs
 +++ b/src/config.rs
 @@ -261,7 +261,6 @@ impl GlobalConfig {
@@ -22,7 +22,30 @@ index 2730fd8..5447543 100644
                  VaultMode::TokenTour => (true, MEDIUM_TIMEOUT),
                  VaultMode::Tour => (true, MEDIUM_TIMEOUT),
              };
-@@ -416,20 +413,6 @@ impl GlobalConfig {
+@@ -379,18 +376,10 @@ impl GlobalConfig {
+     pub fn gene(&self) -> Option<Diploid> { self.gene_cache }
+ 
+     pub fn force_pattern(&self, pattern: Haploid) {
+-        let args = pattern.serialize_u32();
+-        xous::send_message(
+-            self.led_server,
+-            xous::Message::new_scalar(
+-                LedManagerOp::Force.to_usize().unwrap(),
+-                args[0] as usize,
+-                args[1] as usize,
+-                args[2] as usize,
+-                args[3] as usize,
+-            ),
+-        )
+-        .ok();
++        // Use the stock gene transport: a memory-backed Diploid sent with SetGene.
++        // Two identical strands are the console-side marker for an exact custom
++        // phenotype, avoiding the dominance rules that would otherwise alter it.
++        Diploid([pattern, pattern]).send(self.led_server, LedManagerOp::SetGene.to_usize().unwrap());
+     }
+ 
+     pub fn configure_eyes(&self, eyes: EyePattern) {
+@@ -416,20 +405,6 @@ impl GlobalConfig {
          .ok();
      }
  

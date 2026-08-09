@@ -44,7 +44,7 @@ Protocol v2 keeps the badge console's native 9-byte ring phenotype intact and ap
 DC34LIGHT://<Base45 record>
 ```
 
-The firmware checks the magic, version, flags, exact length, canonical field ranges, and CRC-16/CCITT-FALSE. The uppercase prefix keeps the complete QR in its lower-density alphanumeric mode; old lowercase codes remain accepted. Forced ring updates use the same proven FIFO sender as the stock `SetGene` path, including the BIO write tag and clear boundaries. Custom-eye startup also fails dark rather than briefly selecting full-power white. Accepted patterns are persisted together in PDDB. Legacy v1 nine-byte QRs remain accepted and select the stock eye-follow behavior.
+The firmware checks the magic, version, flags, exact length, canonical field ranges, and CRC-16/CCITT-FALSE. The uppercase prefix keeps the complete QR in its lower-density alphanumeric mode; old lowercase codes remain accepted. Ring patterns use the original memory-backed `SetGene` operation. BadgeBloom marks an exact custom phenotype with two identical strands so the console keeps all nine editor bytes instead of blending them with the stock dominance rules. Custom-eye startup also fails dark rather than briefly selecting full-power white. Accepted patterns are persisted together in PDDB. Legacy v1 nine-byte QRs remain accepted and select the stock eye-follow behavior.
 
 ```text
 ring:  03 A0 FF DC F5 00 80 FF FF
