@@ -1,6 +1,6 @@
 import QRCode from "qrcode";
 import "./styles.css";
-import { encodeLightQr, FIELD_NAMES, hsvToCss } from "./protocol.js";
+import { EYE_BEHAVIORS, encodeLightQr, FIELD_NAMES, hexToRgb, hsvToCss } from "./protocol.js";
 import {
   IMAGE_FRAME_COUNT,
   IMAGE_HEIGHT,
@@ -22,12 +22,18 @@ const controls = {
   hueReverse: document.querySelector("#hueReverse"),
   chaser: document.querySelector("#chaser"),
   gamma: document.querySelector("#gamma"),
+  eyeBehavior: document.querySelector("#eyeBehavior"),
+  eyeLeft: document.querySelector("#eyeLeft"),
+  eyeRight: document.querySelector("#eyeRight"),
+  eyeInterval: document.querySelector("#eyeInterval"),
+  eyeBrightness: document.querySelector("#eyeBrightness"),
 };
 const qrCanvas = document.querySelector("#qrCanvas");
 const payloadText = document.querySelector("#payloadText");
 const byteReadout = document.querySelector("#byteReadout");
 const status = document.querySelector("#transferStatus");
 const ledRing = document.querySelector("#ledRing");
+const eyeLeds = [document.querySelector("#leftEyeLed"), document.querySelector("#rightEyeLed")];
 let currentEncoding;
 let qrRevision = 0;
 
@@ -43,17 +49,20 @@ const presets = {
   tide: {
     colorStart: "#33ff99", colorEnd: "#5267ff", saturation: 230,
     waves: 3, speed: 150, hueRate: 5, pulseReverse: false,
-    hueReverse: true, chaser: false, gamma: true,
+    hueReverse: true, chaser: false, gamma: true, eyeBehavior: "blink",
+    eyeLeft: "#33ff99", eyeRight: "#5267ff", eyeInterval: 1500, eyeBrightness: 220,
   },
   ember: {
     colorStart: "#ff2600", colorEnd: "#ffb000", saturation: 255,
     waves: 2, speed: 210, hueRate: 2, pulseReverse: true,
-    hueReverse: false, chaser: true, gamma: true,
+    hueReverse: false, chaser: true, gamma: true, eyeBehavior: "wink",
+    eyeLeft: "#ff2600", eyeRight: "#ffb000", eyeInterval: 900, eyeBrightness: 255,
   },
   violet: {
     colorStart: "#5424ff", colorEnd: "#ff42cf", saturation: 245,
     waves: 5, speed: 105, hueRate: 8, pulseReverse: false,
-    hueReverse: false, chaser: false, gamma: false,
+    hueReverse: false, chaser: false, gamma: false, eyeBehavior: "breathe",
+    eyeLeft: "#9f5cff", eyeRight: "#ff42cf", eyeInterval: 2200, eyeBrightness: 230,
   },
 };
 
@@ -79,6 +88,9 @@ function updateOutputs() {
   document.querySelector('output[for="waves"]').value = controls.waves.value;
   document.querySelector('output[for="speed"]').value = controls.speed.value;
   document.querySelector('output[for="hueRate"]').value = controls.hueRate.value;
+  document.querySelector('output[for="eyeInterval"]').value =
+    `${(Number(controls.eyeInterval.value) / 1000).toFixed(1)}s`;
+  document.querySelector('output[for="eyeBrightness"]').value = controls.eyeBrightness.value;
 }
 
 async function updateQr() {
@@ -87,7 +99,7 @@ async function updateQr() {
     currentEncoding = encodeLightQr(readSettings());
     payloadText.textContent = currentEncoding.uri;
     byteReadout.replaceChildren();
-    currentEncoding.gene.forEach((value, index) => {
+    currentEncoding.payload.forEach((value, index) => {
       const term = document.createElement("dt");
       term.textContent = FIELD_NAMES[index];
       const detail = document.createElement("dd");
@@ -118,6 +130,7 @@ function triangle(value) {
 
 function animate(timeMs) {
   const gene = currentEncoding?.gene;
+  const ringColors = [];
   if (gene) {
     const [periods, rateByte, direction, saturation, huePacked, hueStart, hueEnd, chaser, gamma] = gene;
     const tau = 60 + rateByte * (700 - 60) / 255;
@@ -134,13 +147,64 @@ function animate(timeMs) {
       if (gamma > 127) value = value * value / 255;
       const isChaser = chaser < 88 && Math.floor(loop / 2) % 8 === index;
       const color = isChaser ? "rgb(220 220 220)" : hsvToCss(hue, saturation, value);
+      ringColors[index] = color;
       const glow = Math.max(5, value / 7);
       led.style.background = color;
       led.style.boxShadow = `0 0 ${glow}px ${color}`;
     });
-
+    animateEyes(timeMs, ringColors);
   }
   requestAnimationFrame(animate);
+}
+
+function scaledRgb(color, intensity) {
+  const [r, g, b] = hexToRgb(color);
+  const scale = Math.max(0, Math.min(255, intensity)) / 255;
+  return `rgb(${Math.round(r * scale)} ${Math.round(g * scale)} ${Math.round(b * scale)})`;
+}
+
+function setEye(eye, color, intensity) {
+  const rendered = intensity <= 0 ? "rgb(0 0 0)" : scaledRgb(color, intensity);
+  eye.style.background = rendered;
+  eye.style.boxShadow = intensity <= 0 ? "none" : `0 0 ${5 + intensity / 8}px ${rendered}`;
+  eye.style.transform = `scaleY(${intensity <= 0 ? 0.12 : 1})`;
+}
+
+function animateEyes(timeMs, ringColors) {
+  const behavior = EYE_BEHAVIORS[controls.eyeBehavior.value];
+  const brightness = Number(controls.eyeBrightness.value);
+  const period = Number(controls.eyeInterval.value);
+  const phase = timeMs % period;
+  let leftIntensity = brightness;
+  let rightIntensity = brightness;
+
+  if (behavior === EYE_BEHAVIORS.follow) {
+    eyeLeds[0].style.background = ringColors[0] ?? "transparent";
+    eyeLeds[1].style.background = ringColors[4] ?? "transparent";
+    eyeLeds.forEach((eye, index) => {
+      eye.style.boxShadow = `0 0 18px ${ringColors[index * 4] ?? "transparent"}`;
+      eye.style.transform = "scaleY(1)";
+    });
+    return;
+  }
+  if (behavior === EYE_BEHAVIORS.off) {
+    leftIntensity = 0;
+    rightIntensity = 0;
+  } else if (behavior === EYE_BEHAVIORS.blink && phase < 140) {
+    leftIntensity = 0;
+    rightIntensity = 0;
+  } else if (behavior === EYE_BEHAVIORS.wink) {
+    const half = period / 2;
+    if (phase < 140) leftIntensity = 0;
+    if (phase >= half && phase < half + 140) rightIntensity = 0;
+  } else if (behavior === EYE_BEHAVIORS.breathe) {
+    const wave = 1 - Math.abs(2 * phase / period - 1);
+    leftIntensity = Math.max(10, brightness * wave);
+    rightIntensity = Math.max(10, brightness * wave);
+  }
+
+  setEye(eyeLeds[0], controls.eyeLeft.value, leftIntensity);
+  setEye(eyeLeds[1], controls.eyeRight.value, rightIntensity);
 }
 
 form.addEventListener("input", update);
@@ -165,6 +229,11 @@ document.querySelector("#randomize").addEventListener("click", () => {
     hueReverse: Math.random() > 0.5,
     chaser: Math.random() > 0.75,
     gamma: Math.random() > 0.35,
+    eyeBehavior: ["steady", "blink", "wink", "breathe"][Math.floor(Math.random() * 4)],
+    eyeLeft: toHex(randomHue()),
+    eyeRight: toHex(randomHue()),
+    eyeInterval: 500 + Math.floor(Math.random() * 36) * 100,
+    eyeBrightness: 120 + Math.floor(Math.random() * 136),
   });
 });
 

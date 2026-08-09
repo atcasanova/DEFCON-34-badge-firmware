@@ -19,7 +19,7 @@
 
     <main>
       <section class="hero">
-        <p class="eyebrow">BADGEBLOOM / UNOFFICIAL DC34 TOOL / PROTOCOL 01</p>
+        <p class="eyebrow">BADGEBLOOM / UNOFFICIAL DC34 TOOL / PROTOCOL 02</p>
         <h1>Make the badge<br /><em>move in color.</em></h1>
         <p class="lede">Shape the native light-gene engine or turn an image into a monochrome badge wallpaper, then transfer it through the camera.</p>
       </section>
@@ -32,11 +32,15 @@
               <div class="orbit"></div>
               <div class="badge-core">
                 <span class="core-label">DEFCON<br /><b>34</b></span>
+                <span class="badge-eyes" aria-label="Animated left and right eye LED preview">
+                  <i id="leftEyeLed" class="eye-led"></i>
+                  <i id="rightEyeLed" class="eye-led"></i>
+                </span>
                 <span class="human-label">HUMAN</span>
               </div>
               <div id="ledRing" class="led-ring" aria-hidden="true"></div>
             </div>
-            <p class="preview-note">Preview follows the badge's 8-LED diamond: four corners and four side midpoints. Final brightness is hardware-limited to protect the batteries.</p>
+            <p class="preview-note">Preview follows all ten LEDs: two independently animated eyes plus the 8-LED diamond. Final brightness is hardware-limited to protect the batteries.</p>
           </div>
 
           <div class="presets" aria-label="Pattern presets">
@@ -48,7 +52,7 @@
         </div>
 
         <form id="patternForm" class="panel controls-panel">
-          <div class="panel-kicker"><span>GENE CONTROLS</span><span>09 BYTES</span></div>
+          <div class="panel-kicker"><span>LIGHT CONTROLS</span><span>18 BYTES</span></div>
 
           <fieldset>
             <legend>Palette</legend>
@@ -67,6 +71,40 @@
               <input id="saturation" name="saturation" type="range" min="0" max="255" value="230" />
             </label>
             <p class="hint">The native engine supports one continuous hue interval and one shared saturation. Hue endpoints are ordered automatically.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Eyes</legend>
+            <label class="select-field">
+              <span>Behavior</span>
+              <select id="eyeBehavior" name="eyeBehavior">
+                <option value="follow">Follow ring / stock tilt gate</option>
+                <option value="off">Eyes off</option>
+                <option value="steady">Steady</option>
+                <option value="blink" selected>Human blink</option>
+                <option value="wink">Alternating wink</option>
+                <option value="breathe">Breathe</option>
+              </select>
+            </label>
+            <div class="color-grid eye-color-grid">
+              <label class="color-field">
+                <span>Left eye</span>
+                <input id="eyeLeft" name="eyeLeft" type="color" value="#33ff99" />
+              </label>
+              <label class="color-field">
+                <span>Right eye</span>
+                <input id="eyeRight" name="eyeRight" type="color" value="#5267ff" />
+              </label>
+            </div>
+            <label class="range-field">
+              <span><b>Blink / breathe tempo</b><output for="eyeInterval"></output></span>
+              <input id="eyeInterval" name="eyeInterval" type="range" min="500" max="4000" step="100" value="1500" />
+            </label>
+            <label class="range-field">
+              <span><b>Eye brightness</b><output for="eyeBrightness"></output></span>
+              <input id="eyeBrightness" name="eyeBrightness" type="range" min="0" max="255" value="220" />
+            </label>
+            <p class="hint">The two eye colors are independent. Human blink closes both briefly; alternating wink closes one at a time.</p>
           </fieldset>
 
           <fieldset>
@@ -93,7 +131,7 @@
         </form>
 
         <section class="panel transfer-panel">
-          <div class="panel-kicker"><span>CAMERA TRANSFER</span><span>CRC-16</span></div>
+          <div class="panel-kicker"><span>CAMERA TRANSFER</span><span>V2 / CRC-16</span></div>
           <div class="qr-shell"><canvas id="qrCanvas" width="280" height="280" aria-label="QR code containing the current light pattern"></canvas></div>
           <h2>Scan to apply</h2>
           <ol>
@@ -172,20 +210,20 @@
               <span id="frameCounter">FRAME – / 8</span>
               <span id="frameTimer">HOLD 2.5S</span>
             </div>
-          </div>
-
-          <div class="wallpaper-transfer-copy">
-            <h3>Slow carousel, no FPS race</h3>
-            <p>The badge collects eight independently checked frames in any order. Duplicates are ignored, and a missed frame is picked up on the next pass.</p>
-            <ol>
-              <li>Press the badge's left button and keep the camera aimed here.</li>
-              <li>Start the carousel. Each QR remains still for 2.5 seconds.</li>
-              <li>After all eight frames, preview the wallpaper and choose Keep or Discard.</li>
-            </ol>
             <label class="range-field frame-hold-control">
               <span><b>Frame hold</b><output for="frameHold">2.5 seconds</output></span>
               <input id="frameHold" type="range" min="1500" max="5000" step="250" value="2500" />
             </label>
+          </div>
+
+          <div class="wallpaper-transfer-copy">
+            <h3>Camera-paced, not FPS</h3>
+            <p>Eight checked frames, any order. Watch the badge for <strong>FRAME N DONE</strong> before the next QR.</p>
+            <ol>
+              <li>Press the badge's left button and keep the camera aimed here.</li>
+              <li>Start the carousel; tune the hold slider beside the QR if needed.</li>
+              <li>After all eight frames, preview the wallpaper and choose Keep or Discard.</li>
+            </ol>
             <div class="button-row carousel-buttons">
               <button id="carouselToggle" class="primary" type="button" disabled>Start carousel</button>
               <button id="previousFrame" type="button" disabled>Previous</button>
@@ -201,6 +239,9 @@
         <span><b>LEFT</b> scan BadgeBloom QR</span>
         <span><b>MIDDLE</b> show wallpaper</span>
         <span><b>RIGHT</b> show source QR</span>
+        <span><b>ROCKER ↑</b> animation faster</span>
+        <span><b>ROCKER ↓</b> animation slower</span>
+        <span><b>ROCKER PRESS</b> reset to 1× speed</span>
       </section>
     </main>
 

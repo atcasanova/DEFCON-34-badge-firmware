@@ -11,7 +11,8 @@ readonly XOUS_TARGET="riscv32imac-unknown-xous-elf"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${1:-${REPO_ROOT}/firmware-build}"
-PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-firmware.patch"
+VAULT_PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-firmware.patch"
+CONSOLE_PATCH_FILE="${REPO_ROOT}/firmware/dc34-badgebloom-console.patch"
 
 for command in cargo curl file git rustc rustup sha256sum; do
   if ! command -v "${command}" >/dev/null 2>&1; then
@@ -20,10 +21,12 @@ for command in cargo curl file git rustc rustup sha256sum; do
   fi
 done
 
-if [[ ! -f "${PATCH_FILE}" ]]; then
-  echo "Firmware patch not found: ${PATCH_FILE}" >&2
-  exit 1
-fi
+for patch_file in "${VAULT_PATCH_FILE}" "${CONSOLE_PATCH_FILE}"; do
+  if [[ ! -f "${patch_file}" ]]; then
+    echo "Firmware patch not found: ${patch_file}" >&2
+    exit 1
+  fi
+done
 
 mkdir -p -- "${OUTPUT_DIR}"
 OUTPUT_DIR="$(cd -- "${OUTPUT_DIR}" && pwd)"
@@ -67,9 +70,11 @@ clone_pin https://github.com/bunnie/dc34-console.git "${BUILD_ROOT}/dc34-console
 clone_pin https://github.com/bunnie/dc34-vault.git "${BUILD_ROOT}/dc34-vault" "${DC34_VAULT_COMMIT}"
 clone_pin https://github.com/betrusted-io/xous-core.git "${BUILD_ROOT}/xous-core" "${XOUS_COMMIT}"
 
-echo "==> Applying BadgeBloom firmware patch"
-git -C "${BUILD_ROOT}/dc34-vault" apply --check "${PATCH_FILE}"
-git -C "${BUILD_ROOT}/dc34-vault" apply "${PATCH_FILE}"
+echo "==> Applying BadgeBloom console and vault patches"
+git -C "${BUILD_ROOT}/dc34-console" apply --check "${CONSOLE_PATCH_FILE}"
+git -C "${BUILD_ROOT}/dc34-console" apply "${CONSOLE_PATCH_FILE}"
+git -C "${BUILD_ROOT}/dc34-vault" apply --check "${VAULT_PATCH_FILE}"
+git -C "${BUILD_ROOT}/dc34-vault" apply "${VAULT_PATCH_FILE}"
 
 echo "==> Installing the matching Xous target and build tools"
 (
@@ -129,7 +134,8 @@ done
   echo "dc34-console: ${DC34_CONSOLE_COMMIT}"
   echo "dc34-vault: ${DC34_VAULT_COMMIT}"
   echo "xous-core: ${XOUS_COMMIT}"
-  echo "Firmware patch SHA-256: $(sha256sum "${PATCH_FILE}" | cut -d' ' -f1)"
+  echo "Console patch SHA-256: $(sha256sum "${CONSOLE_PATCH_FILE}" | cut -d' ' -f1)"
+  echo "Vault patch SHA-256: $(sha256sum "${VAULT_PATCH_FILE}" | cut -d' ' -f1)"
   echo "Signing: public Xous developer key"
 } > "${OUTPUT_DIR}/BUILD-MANIFEST.txt"
 

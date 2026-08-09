@@ -28,6 +28,11 @@ const SETTINGS = {
   hueReverse: true,
   chaser: false,
   gamma: true,
+  eyeBehavior: "wink",
+  eyeLeft: "#123456",
+  eyeRight: "#abcdef",
+  eyeInterval: 1500,
+  eyeBrightness: 210,
 };
 
 let failures = 0;
@@ -56,7 +61,16 @@ test("a generated URI decodes to its original native gene", () => {
   const encoded = encodeLightQr(SETTINGS);
   const decoded = decodeLightQr(encoded.uri);
   assert.deepStrictEqual([...decoded.gene], [...encoded.gene]);
+  assert.deepStrictEqual([...decoded.eyes], [4, 0x12, 0x34, 0x56, 0xab, 0xcd, 0xef, 60, 210]);
+  assert.strictEqual(decoded.version, 2);
   assert.strictEqual(decoded.crc, encoded.crc);
+});
+
+test("legacy v1 light QRs remain compatible and use stock eye behavior", () => {
+  const decoded = decodeLightQr("dc34light://FS8DL6V50SK0PFWZ/U%DG EW+3");
+  assert.strictEqual(decoded.version, 1);
+  assert.deepStrictEqual([...decoded.gene], [3, 160, 255, 220, 245, 0, 128, 255, 255]);
+  assert.deepStrictEqual([...decoded.eyes], [0, 255, 255, 255, 255, 255, 255, 60, 255]);
 });
 
 test("a changed QR record fails validation", () => {

@@ -1,7 +1,16 @@
 diff --git a/src/config.rs b/src/config.rs
-index 9039fcb..6813d3b 100644
+index 9039fcb..2730fd8 100644
 --- a/src/config.rs
 +++ b/src/config.rs
+@@ -8,7 +8,7 @@ use pddb::Pddb;
+ use rand::RngCore;
+ use sha2::{Digest, Sha256};
+ 
+-use crate::VaultMode;
++use crate::{VaultMode, lightqr::EyePattern};
+ 
+ #[derive(PartialEq, Eq, Copy, Clone, Debug)]
+ pub enum AttachState {
 @@ -259,8 +259,9 @@ impl GlobalConfig {
          // handles None case, as well as Some(previous_mode) not the same as Some(current_mode)
          if self.previous_mode != Some(current_mode) {
@@ -25,7 +34,7 @@ index 9039fcb..6813d3b 100644
                  VaultMode::TokenTour => (true, MEDIUM_TIMEOUT),
                  VaultMode::Tour => (true, MEDIUM_TIMEOUT),
              };
-@@ -375,6 +378,21 @@ impl GlobalConfig {
+@@ -375,6 +378,58 @@ impl GlobalConfig {
  
      pub fn gene(&self) -> Option<Diploid> { self.gene_cache }
  
@@ -44,15 +53,52 @@ index 9039fcb..6813d3b 100644
 +        .ok();
 +    }
 +
++    pub fn configure_eyes(&self, eyes: EyePattern) {
++        let left = ((eyes.left[0] as usize) << 16)
++            | ((eyes.left[1] as usize) << 8)
++            | eyes.left[2] as usize;
++        let right = ((eyes.right[0] as usize) << 16)
++            | ((eyes.right[1] as usize) << 8)
++            | eyes.right[2] as usize;
++        let settings = eyes.behavior as usize
++            | ((eyes.rate as usize) << 8)
++            | ((eyes.brightness as usize) << 16);
++        xous::send_message(
++            self.led_server,
++            xous::Message::new_scalar(
++                LedManagerOp::JackEyes.to_usize().unwrap(),
++                2,
++                left,
++                right,
++                settings,
++            ),
++        )
++        .ok();
++    }
++
++    pub fn set_animation_speed(&self, percent: u8) {
++        xous::send_message(
++            self.led_server,
++            xous::Message::new_scalar(
++                LedManagerOp::JackEyes.to_usize().unwrap(),
++                3,
++                percent as usize,
++                0,
++                0,
++            ),
++        )
++        .ok();
++    }
++
      pub fn render_gene(&self) {
          if let Some(gene) = self.gene_cache {
              gene.send(self.led_server, LedManagerOp::SetGene.to_usize().unwrap());
 diff --git a/src/lightqr.rs b/src/lightqr.rs
 new file mode 100644
-index 0000000..27c2f78
+index 0000000..805836b
 --- /dev/null
 +++ b/src/lightqr.rs
-@@ -0,0 +1,181 @@
+@@ -0,0 +1,304 @@
 +//! Decoder and persistence for the open, unauthenticated QR format used by DC34 Light Studio.
 +//!
 +//! This intentionally lives outside the encrypted conference light-exchange
@@ -64,12 +110,85 @@ index 0000000..27c2f78
 +use dc34_api::{DC34_DICT, Haploid};
 +
 +pub const URI_PREFIX: &str = "dc34light://";
-+const STORAGE_KEY: &str = "lightstudio.gene";
++const STORAGE_KEY: &str = "badgebloom.lights.v2";
++const LEGACY_STORAGE_KEY: &str = "lightstudio.gene";
 +const MAGIC: [u8; 4] = *b"DC34";
-+const VERSION: u8 = 1;
++const LEGACY_VERSION: u8 = 1;
++const VERSION: u8 = 2;
 +const HEADER_LEN: usize = 6;
 +const GENE_LEN: usize = core::mem::size_of::<Haploid>();
-+const RECORD_LEN: usize = HEADER_LEN + GENE_LEN + 2;
++const EYE_LEN: usize = 9;
++const PATTERN_LEN: usize = GENE_LEN + EYE_LEN;
++const LEGACY_RECORD_LEN: usize = HEADER_LEN + GENE_LEN + 2;
++const RECORD_LEN: usize = HEADER_LEN + PATTERN_LEN + 2;
++
++pub const EYE_FOLLOW: u8 = 0;
++pub const EYE_OFF: u8 = 1;
++pub const EYE_STEADY: u8 = 2;
++pub const EYE_BLINK: u8 = 3;
++pub const EYE_WINK: u8 = 4;
++pub const EYE_BREATHE: u8 = 5;
++
++#[derive(Copy, Clone, Debug, Eq, PartialEq)]
++pub struct EyePattern {
++    pub behavior: u8,
++    pub left: [u8; 3],
++    pub right: [u8; 3],
++    /// Animation period in 25 ms units.
++    pub rate: u8,
++    pub brightness: u8,
++}
++
++impl EyePattern {
++    pub fn follow_ring() -> Self {
++        Self {
++            behavior: EYE_FOLLOW,
++            left: [255; 3],
++            right: [255; 3],
++            rate: 60,
++            brightness: 255,
++        }
++    }
++
++    pub fn serialize(self) -> [u8; EYE_LEN] {
++        [
++            self.behavior,
++            self.left[0],
++            self.left[1],
++            self.left[2],
++            self.right[0],
++            self.right[1],
++            self.right[2],
++            self.rate,
++            self.brightness,
++        ]
++    }
++
++    fn deserialize(bytes: &[u8]) -> Option<Self> {
++        if bytes.len() != EYE_LEN {
++            return None;
++        }
++        Some(Self {
++            behavior: bytes[0],
++            left: bytes[1..4].try_into().ok()?,
++            right: bytes[4..7].try_into().ok()?,
++            rate: bytes[7],
++            brightness: bytes[8],
++        })
++    }
++}
++
++#[derive(Copy, Clone, Debug)]
++pub struct LightPattern {
++    pub gene: Haploid,
++    pub eyes: EyePattern,
++}
++
++impl LightPattern {
++    fn serialize(self) -> Vec<u8> {
++        [self.gene.serialize().as_slice(), self.eyes.serialize().as_slice()].concat()
++    }
++}
 +
 +#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 +pub enum LightQrError {
@@ -98,51 +217,75 @@ index 0000000..27c2f78
 +    }
 +}
 +
-+pub fn decode_uri(uri: &str) -> Result<Haploid, LightQrError> {
++pub fn decode_uri(uri: &str) -> Result<LightPattern, LightQrError> {
 +    let encoded = uri.strip_prefix(URI_PREFIX).ok_or(LightQrError::NotLightQr)?;
 +    let record = base45::decode(encoded.as_bytes()).map_err(|_| LightQrError::InvalidBase45)?;
 +
-+    if record.len() != RECORD_LEN {
++    if record.len() != LEGACY_RECORD_LEN && record.len() != RECORD_LEN {
 +        return Err(LightQrError::InvalidLength);
 +    }
 +    if record[..MAGIC.len()] != MAGIC {
 +        return Err(LightQrError::InvalidMagic);
 +    }
-+    if record[4] != VERSION {
++    let version = record[4];
++    if version != LEGACY_VERSION && version != VERSION {
 +        return Err(LightQrError::UnsupportedVersion);
++    }
++    if (version == LEGACY_VERSION && record.len() != LEGACY_RECORD_LEN)
++        || (version == VERSION && record.len() != RECORD_LEN)
++    {
++        return Err(LightQrError::InvalidLength);
 +    }
 +    if record[5] != 0 {
 +        return Err(LightQrError::UnsupportedFlags);
 +    }
 +
-+    let checksum_offset = RECORD_LEN - 2;
++    let checksum_offset = record.len() - 2;
 +    let expected = u16::from_be_bytes(record[checksum_offset..].try_into().unwrap());
 +    if crc16_ccitt_false(&record[..checksum_offset]) != expected {
 +        return Err(LightQrError::ChecksumMismatch);
 +    }
 +
-+    let pattern = Haploid::deserialize(&record[HEADER_LEN..checksum_offset])
++    let gene = Haploid::deserialize(&record[HEADER_LEN..HEADER_LEN + GENE_LEN])
 +        .ok_or(LightQrError::InvalidPattern)?;
-+    validate_pattern(&pattern)?;
-+    Ok(pattern)
++    validate_pattern(&gene)?;
++    let eyes = if version == VERSION {
++        EyePattern::deserialize(&record[HEADER_LEN + GENE_LEN..checksum_offset])
++            .ok_or(LightQrError::InvalidPattern)?
++    } else {
++        EyePattern::follow_ring()
++    };
++    validate_eyes(&eyes)?;
++    Ok(LightPattern { gene, eyes })
 +}
 +
-+pub fn load_pattern() -> Option<Haploid> {
++fn load_bytes(key_name: &str, length: usize) -> Option<Vec<u8>> {
 +    let pddb = pddb::Pddb::new();
-+    let mut key = pddb
-+        .get(DC34_DICT, STORAGE_KEY, None, true, true, Some(GENE_LEN), None::<fn()>)
-+        .ok()?;
-+    let mut bytes = [0u8; GENE_LEN];
++    let mut key = pddb.get(DC34_DICT, key_name, None, false, false, None, None::<fn()>).ok()?;
++    let mut bytes = vec![0u8; length];
 +    key.read_exact(&mut bytes).ok()?;
-+    let pattern = Haploid::deserialize(&bytes)?;
-+    validate_pattern(&pattern).ok()?;
-+    Some(pattern)
++    Some(bytes)
 +}
 +
-+pub fn save_pattern(pattern: Haploid) -> bool {
++pub fn load_pattern() -> Option<LightPattern> {
++    if let Some(bytes) = load_bytes(STORAGE_KEY, PATTERN_LEN) {
++        let gene = Haploid::deserialize(&bytes[..GENE_LEN])?;
++        let eyes = EyePattern::deserialize(&bytes[GENE_LEN..])?;
++        validate_pattern(&gene).ok()?;
++        validate_eyes(&eyes).ok()?;
++        return Some(LightPattern { gene, eyes });
++    }
++
++    let bytes = load_bytes(LEGACY_STORAGE_KEY, GENE_LEN)?;
++    let gene = Haploid::deserialize(&bytes)?;
++    validate_pattern(&gene).ok()?;
++    Some(LightPattern { gene, eyes: EyePattern::follow_ring() })
++}
++
++pub fn save_pattern(pattern: LightPattern) -> bool {
 +    let pddb = pddb::Pddb::new();
 +    let Ok(mut key) =
-+        pddb.get(DC34_DICT, STORAGE_KEY, None, true, true, Some(GENE_LEN), None::<fn()>)
++        pddb.get(DC34_DICT, STORAGE_KEY, None, true, true, Some(PATTERN_LEN), None::<fn()>)
 +    else {
 +        return false;
 +    };
@@ -150,6 +293,17 @@ index 0000000..27c2f78
 +        return false;
 +    }
 +    pddb.sync().is_ok()
++}
++
++fn validate_eyes(eyes: &EyePattern) -> Result<(), LightQrError> {
++    if !matches!(
++        eyes.behavior,
++        EYE_FOLLOW | EYE_OFF | EYE_STEADY | EYE_BLINK | EYE_WINK | EYE_BREATHE
++    ) || !(8..=240).contains(&eyes.rate)
++    {
++        return Err(LightQrError::InvalidPattern);
++    }
++    Ok(())
 +}
 +
 +fn validate_pattern(pattern: &Haploid) -> Result<(), LightQrError> {
@@ -181,7 +335,7 @@ index 0000000..27c2f78
 +mod tests {
 +    use super::*;
 +
-+    fn make_uri(pattern: Haploid) -> String {
++    fn make_uri(pattern: LightPattern) -> String {
 +        let mut record = Vec::from(MAGIC);
 +        record.push(VERSION);
 +        record.push(0);
@@ -192,28 +346,42 @@ index 0000000..27c2f78
 +
 +    #[test]
 +    fn decodes_a_canonical_pattern() {
-+        let pattern = Haploid {
-+            cd_period: 3,
-+            cd_rate: 160,
-+            cd_dir: 255,
-+            sat: 220,
-+            hue_ratedir: 0xf5,
-+            hue_base: 12,
-+            hue_bound: 180,
-+            chaser: 255,
-+            nonlin: 255,
++        let pattern = LightPattern {
++            gene: Haploid {
++                cd_period: 3,
++                cd_rate: 160,
++                cd_dir: 255,
++                sat: 220,
++                hue_ratedir: 0xf5,
++                hue_base: 12,
++                hue_bound: 180,
++                chaser: 255,
++                nonlin: 255,
++            },
++            eyes: EyePattern {
++                behavior: EYE_WINK,
++                left: [0x12, 0x34, 0x56],
++                right: [0xab, 0xcd, 0xef],
++                rate: 60,
++                brightness: 210,
++            },
 +        };
-+        assert_eq!(decode_uri(&make_uri(pattern)).unwrap().serialize(), pattern.serialize());
++        let decoded = decode_uri(&make_uri(pattern)).unwrap();
++        assert_eq!(decoded.gene.serialize(), pattern.gene.serialize());
++        assert_eq!(decoded.eyes, pattern.eyes);
 +    }
 +
 +    #[test]
 +    fn rejects_corruption() {
-+        let pattern = Haploid {
-+            cd_period: 2,
-+            hue_bound: 1,
-+            chaser: 255,
-+            nonlin: 255,
-+            ..Default::default()
++        let pattern = LightPattern {
++            gene: Haploid {
++                cd_period: 2,
++                hue_bound: 1,
++                chaser: 255,
++                nonlin: 255,
++                ..Default::default()
++            },
++            eyes: EyePattern::follow_ring(),
 +        };
 +        let mut uri = make_uri(pattern);
 +        uri.push('0');
@@ -224,9 +392,10 @@ index 0000000..27c2f78
 +    fn matches_the_web_encoder_vector() {
 +        let pattern = decode_uri("dc34light://FS8DL6V50SK0PFWZ/U%DG EW+3").unwrap();
 +        assert_eq!(
-+            pattern.serialize(),
++            pattern.gene.serialize(),
 +            vec![0x03, 0xa0, 0xff, 0xdc, 0xf5, 0x00, 0x80, 0xff, 0xff]
 +        );
++        assert_eq!(pattern.eyes, EyePattern::follow_ring());
 +    }
 +
 +    #[test]
@@ -235,7 +404,7 @@ index 0000000..27c2f78
 +    }
 +}
 diff --git a/src/main.rs b/src/main.rs
-index 553647e..cd01a47 100644
+index 553647e..c174ec0 100644
 --- a/src/main.rs
 +++ b/src/main.rs
 @@ -20,8 +20,10 @@ mod fido2;
@@ -249,7 +418,19 @@ index 553647e..cd01a47 100644
  
  use core::sync::atomic::{AtomicBool, Ordering};
  use std::io::Read;
-@@ -57,10 +59,13 @@ pub enum VaultMode {
+@@ -38,6 +40,11 @@ use xous_ipc::Buffer;
+ use crate::actions::ActionOp;
+ use crate::config::{GlobalConfig, read_badgetype_pins};
+ 
++const ANIMATION_SPEED_MIN: u8 = 25;
++const ANIMATION_SPEED_MAX: u8 = 200;
++const ANIMATION_SPEED_STEP: u8 = 25;
++const ANIMATION_SPEED_DEFAULT: u8 = 100;
++
+ /*
+   k0 hash check correct value: dca9ea49
+ */
+@@ -57,10 +64,13 @@ pub enum VaultMode {
      Idle,
      IdleDevMode,
      ShowKey { quantum: u32 },
@@ -263,7 +444,7 @@ index 553647e..cd01a47 100644
      FactoryTest,
      StandAloneTest,
      Tour,
-@@ -77,6 +82,7 @@ impl VaultMode {
+@@ -77,6 +87,7 @@ impl VaultMode {
          match self {
              VaultMode::About => true,
              VaultMode::ConfirmGene => false,
@@ -271,7 +452,7 @@ index 553647e..cd01a47 100644
              VaultMode::FactoryTest => true,
              VaultMode::StandAloneTest => true,
              VaultMode::DefconHelp => true,
-@@ -86,8 +92,10 @@ impl VaultMode {
+@@ -86,8 +97,10 @@ impl VaultMode {
              VaultMode::Password => false,
              VaultMode::Totp => true,
              VaultMode::GeneScan => true,
@@ -282,29 +463,55 @@ index 553647e..cd01a47 100644
              VaultMode::TokenTour => false,
              VaultMode::Tour => false,
          }
-@@ -190,6 +198,10 @@ fn main() -> ! {
+@@ -190,6 +203,12 @@ fn main() -> ! {
      let global_config = Arc::new(Mutex::new(global_config));
      *mode.lock().unwrap() = init_mode;
      vault_ui.set_global_config(global_config.clone());
 +    if let Some(pattern) = lightqr::load_pattern() {
 +        log::info!("Restoring saved Light Studio pattern: {:?}", pattern);
-+        global_config.lock().unwrap().force_pattern(pattern);
++        let config = global_config.lock().unwrap();
++        config.force_pattern(pattern.gene);
++        config.configure_eyes(pattern.eyes);
 +    }
  
      log::info!("Fido2 service");
      fido2::fido2_handler(conn, allow_host.clone(), opensk_mutex.clone(), animate.clone());
-@@ -302,6 +314,10 @@ fn main() -> ! {
+@@ -302,6 +321,11 @@ fn main() -> ! {
      let mut mutation_param: u8 = 0;
      let mut k_last = '\u{0000}';
      let mut skip_one_key = false;
-+    let mut pending_light_pattern: Option<Haploid> = None;
++    let mut pending_light_pattern: Option<lightqr::LightPattern> = None;
++    let mut animation_speed_percent = ANIMATION_SPEED_DEFAULT;
 +    let mut image_transfer = wallpaper::ImageTransfer::new();
 +    let mut pending_wallpaper: Option<[u32; wallpaper::BITMAP_WORDS]> = None;
 +    let mut previous_wallpaper: Option<[u32; wallpaper::BITMAP_WORDS]> = None;
      loop {
          global_config.lock().unwrap().update_power_state(mode.lock().unwrap().clone());
          let msg = xous::receive_message(sid).unwrap();
-@@ -377,7 +393,7 @@ fn main() -> ! {
+@@ -354,6 +378,22 @@ fn main() -> ! {
+                 }
+                 let mode_now = *mode.lock().unwrap();
+                 let k = char::from_u32(k1 as u32).unwrap_or('\u{0000}');
++                if !menu_active && mode_now == VaultMode::IdleDevMode && matches!(k, '↑' | '↓' | '∴') {
++                    animation_speed_percent = match k {
++                        '↑' => animation_speed_percent
++                            .saturating_add(ANIMATION_SPEED_STEP)
++                            .min(ANIMATION_SPEED_MAX),
++                        '↓' => animation_speed_percent
++                            .saturating_sub(ANIMATION_SPEED_STEP)
++                            .max(ANIMATION_SPEED_MIN),
++                        '∴' => ANIMATION_SPEED_DEFAULT,
++                        _ => animation_speed_percent,
++                    };
++                    global_config.lock().unwrap().set_animation_speed(animation_speed_percent);
++                    vault_ui.set_animation_speed(animation_speed_percent);
++                    vault_ui.redraw();
++                    continue;
++                }
+                 if k == '🔽' || k == '🔼' {
+                     mutation_param = mutation_param.saturating_add(8);
+                 }
+@@ -377,7 +417,7 @@ fn main() -> ! {
                  if menu_active {
                      if matches!(mode_now, VaultMode::Tour) {
                          tour_menu_mgr.key_press(k);
@@ -313,7 +520,7 @@ index 553647e..cd01a47 100644
                          gene_menu_mgr.key_press(k);
                      } else if matches!(mode_now, VaultMode::Idle)
                          || matches!(mode_now, VaultMode::IdleDevMode)
-@@ -396,7 +412,7 @@ fn main() -> ! {
+@@ -396,7 +436,7 @@ fn main() -> ! {
                              animate.store(false, Ordering::SeqCst);
                              if matches!(mode_now, VaultMode::Tour) {
                                  tour_menu_mgr.redraw();
@@ -322,7 +529,7 @@ index 553647e..cd01a47 100644
                                  gene_menu_mgr.redraw();
                              } else if matches!(mode_now, VaultMode::Idle)
                                  || matches!(mode_now, VaultMode::IdleDevMode)
-@@ -593,7 +609,12 @@ fn main() -> ! {
+@@ -593,7 +633,12 @@ fn main() -> ! {
                  .ok();
              }
              Some(VaultOp::AbortQr) => {
@@ -336,17 +543,23 @@ index 553647e..cd01a47 100644
                      *mode.lock().unwrap() = VaultMode::Idle;
                      animate.store(VaultMode::Idle.should_animate(), Ordering::SeqCst);
                      vault_ui.redraw();
-@@ -614,6 +635,110 @@ fn main() -> ! {
+@@ -614,6 +659,120 @@ fn main() -> ! {
                  log::info!("mode: {:?}, s: {}", mode_now, s.s);
                  skip_one_key = false;
  
 +                match image_transfer.accept_uri(&s.s) {
-+                    Ok(wallpaper::FrameStatus::Progress { received, total, duplicate }) => {
-+                        log::info!("Wallpaper transfer progress: {}/{} duplicate={}", received, total, duplicate);
++                    Ok(wallpaper::FrameStatus::Progress { frame, received, total, duplicate }) => {
++                        log::info!(
++                            "Wallpaper frame {} imported: {}/{} duplicate={}",
++                            frame + 1,
++                            received,
++                            total,
++                            duplicate
++                        );
 +                        *mode.lock().unwrap() = VaultMode::GeneScan;
 +                        animate.store(false, Ordering::SeqCst);
-+                        vault_ui.image_scan_progress(received, total, duplicate);
-+                        tt.sleep_ms(400).ok();
++                        vault_ui.image_scan_progress(frame, received, total, duplicate);
++                        tt.sleep_ms(550).ok();
 +                        vault_ui.camera_transition();
 +                        xous::send_message(
 +                            actions_conn,
@@ -405,7 +618,11 @@ index 553647e..cd01a47 100644
 +                match lightqr::decode_uri(&s.s) {
 +                    Ok(pattern) => {
 +                        log::info!("Applying Light Studio pattern: {:?}", pattern);
-+                        global_config.lock().unwrap().force_pattern(pattern);
++                        {
++                            let config = global_config.lock().unwrap();
++                            config.force_pattern(pattern.gene);
++                            config.configure_eyes(pattern.eyes);
++                        }
 +                        pending_light_pattern = Some(pattern);
 +                        *mode.lock().unwrap() = VaultMode::ConfirmGene;
 +                        animate.store(false, Ordering::SeqCst);
@@ -447,7 +664,7 @@ index 553647e..cd01a47 100644
                  match mode_now {
                      VaultMode::GeneScan
                      | VaultMode::ResponseGene { quantum: _ }
-@@ -929,15 +1054,50 @@ fn main() -> ! {
+@@ -929,15 +1088,54 @@ fn main() -> ! {
                  vault_ui.redraw();
              }
              Some(VaultOp::KeepGene) => {
@@ -488,9 +705,13 @@ index 553647e..cd01a47 100644
 +                    vault_ui.user_bitmap = previous_wallpaper.take();
 +                } else if pending_light_pattern.take().is_some() {
 +                    if let Some(pattern) = lightqr::load_pattern() {
-+                        global_config.lock().unwrap().force_pattern(pattern);
++                        let config = global_config.lock().unwrap();
++                        config.force_pattern(pattern.gene);
++                        config.configure_eyes(pattern.eyes);
 +                    } else {
-+                        global_config.lock().unwrap().render_gene();
++                        let config = global_config.lock().unwrap();
++                        config.render_gene();
++                        config.configure_eyes(lightqr::EyePattern::follow_ring());
 +                    }
 +                } else {
 +                    global_config.lock().unwrap().revert_gene();
@@ -505,7 +726,7 @@ index 553647e..cd01a47 100644
              Some(VaultOp::TokenMode) => {
                  *mode.lock().unwrap() = VaultMode::Password;
 diff --git a/src/ux.rs b/src/ux.rs
-index f2746d1..5f9b25a 100644
+index f2746d1..d7847f0 100644
 --- a/src/ux.rs
 +++ b/src/ux.rs
 @@ -17,6 +17,7 @@ use crate::action_handler::SelectedEntry;
@@ -516,7 +737,48 @@ index f2746d1..5f9b25a 100644
  const FAST_SCROLL_DELAY_MS: u64 = 1300;
  const KEYUP_DELAY_MS: u64 = 100;
  /// How many elements to skip through on fast scroll
-@@ -917,7 +918,17 @@ impl VaultUi {
+@@ -537,6 +538,7 @@ pub struct VaultUi {
+     edge: bool,
+     last_mode: VaultMode,
+     pub bio_loaded: bool,
++    animation_speed_percent: u8,
+ }
+ 
+ impl VaultUi {
+@@ -601,6 +603,7 @@ impl VaultUi {
+             edge: false,
+             last_mode: VaultMode::FactoryTest,
+             bio_loaded: false,
++            animation_speed_percent: 100,
+         }
+     }
+ 
+@@ -874,6 +877,24 @@ impl VaultUi {
+                     tv.draw_border = false;
+                     write!(tv, "DEV MODE").ok();
+                     self.gfx.draw_textview(&mut tv).ok();
++
++                    let mut speed = TextView::new(
++                        Gid::dummy(),
++                        TextBounds::CenteredTop(Rectangle::new(Point::new(0, 0), Point::new(127, 12))),
++                    );
++                    speed.invert = true;
++                    speed.margin = Point::new(1, 1);
++                    speed.style = GlyphStyle::Small;
++                    speed.draw_border = false;
++                    speed.clear_area = false;
++                    write!(
++                        speed,
++                        "SPEED {}.{:02}x",
++                        self.animation_speed_percent / 100,
++                        self.animation_speed_percent % 100
++                    )
++                    .ok();
++                    self.gfx.draw_textview(&mut speed).ok();
+                 }
+                 // indicate BIO hacks
+                 if self.bio_loaded && (now / 1000) % 2 == 0 {
+@@ -917,7 +938,17 @@ impl VaultUi {
                      _ => {}
                  }
              }
@@ -535,7 +797,7 @@ index f2746d1..5f9b25a 100644
                  if let Some(code) = &self.qr_override {
                      if quantum & 7 == 0 {
                          self.clear_area();
-@@ -927,7 +938,11 @@ impl VaultUi {
+@@ -927,7 +958,11 @@ impl VaultUi {
                          self.gfx.render_qr(&modules, width, Point::new(0, 0)).ok();
                      }
                      if quantum & 7 == 6 {
@@ -548,7 +810,7 @@ index f2746d1..5f9b25a 100644
                          let mut tv = TextView::new(
                              Gid::dummy(),
                              TextBounds::CenteredTop(Rectangle::new(
-@@ -939,21 +954,30 @@ impl VaultUi {
+@@ -939,21 +974,30 @@ impl VaultUi {
                          tv.margin = Point::new(3, -2);
                          tv.style = GlyphStyle::Bold;
                          tv.draw_border = false;
@@ -585,7 +847,7 @@ index f2746d1..5f9b25a 100644
                  }
              }
              VaultMode::GeneScan => {
-@@ -1685,7 +1709,41 @@ impl VaultUi {
+@@ -1685,7 +1729,41 @@ impl VaultUi {
                  }
                  _ => Some(k),
              },
@@ -628,7 +890,7 @@ index f2746d1..5f9b25a 100644
              VaultMode::ShowKey { quantum: _ } => {
                  match k {
                      '🔥' => {
-@@ -1701,7 +1759,7 @@ impl VaultUi {
+@@ -1701,7 +1779,7 @@ impl VaultUi {
                  }
              }
              // this is the next state of the recipient after showing the key
@@ -637,27 +899,37 @@ index f2746d1..5f9b25a 100644
              // this is the state of the donor in response to query
              VaultMode::ResponseGene { quantum: _ } => {
                  self.global_config.as_mut().unwrap().lock().unwrap().clear_nonces();
-@@ -1736,6 +1794,25 @@ impl VaultUi {
+@@ -1736,6 +1814,35 @@ impl VaultUi {
          self.redraw();
      }
  
-+    pub(crate) fn image_scan_progress(&mut self, received: usize, total: usize, duplicate: bool) {
++    pub(crate) fn image_scan_progress(
++        &mut self,
++        frame: usize,
++        received: usize,
++        total: usize,
++        duplicate: bool,
++    ) {
 +        self.gfx.clear().ok();
 +        let mut tv = TextView::new(
 +            Gid::dummy(),
-+            TextBounds::CenteredTop(Rectangle::new(Point::new(0, 42), Point::new(127, 104))),
++            TextBounds::CenteredTop(Rectangle::new(Point::new(0, 28), Point::new(127, 112))),
 +        );
 +        tv.invert = true;
 +        tv.margin = Point::new(2, 2);
 +        tv.style = GlyphStyle::Bold;
 +        tv.draw_border = false;
 +        if duplicate {
-+            write!(tv, "Already have frame\n{} / {}", received, total).ok();
++            write!(tv, "FRAME {} ALREADY\n{} / {}\nNEXT QR", frame + 1, received, total).ok();
 +        } else {
-+            write!(tv, "Wallpaper frame\n{} / {}", received, total).ok();
++            write!(tv, "FRAME {} DONE\n{} / {}\nNEXT QR", frame + 1, received, total).ok();
 +        }
 +        self.gfx.draw_textview(&mut tv).ok();
 +        self.gfx.flush().ok();
++    }
++
++    pub(crate) fn set_animation_speed(&mut self, percent: u8) {
++        self.animation_speed_percent = percent;
 +    }
 +
      pub(crate) fn filter(&mut self, criteria: &String) {
@@ -665,10 +937,10 @@ index f2746d1..5f9b25a 100644
          // only filter passwords in this implementation
 diff --git a/src/wallpaper.rs b/src/wallpaper.rs
 new file mode 100644
-index 0000000..4537e75
+index 0000000..79c34cb
 --- /dev/null
 +++ b/src/wallpaper.rs
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,259 @@
 +//! Camera-paced QR wallpaper transfer and PDDB persistence.
 +//!
 +//! The browser emits eight independently checksummed 256-byte frames. Frames
@@ -730,7 +1002,7 @@ index 0000000..4537e75
 +
 +#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 +pub enum FrameStatus {
-+    Progress { received: usize, total: usize, duplicate: bool },
++    Progress { frame: usize, received: usize, total: usize, duplicate: bool },
 +    Complete([u32; BITMAP_WORDS]),
 +}
 +
@@ -763,6 +1035,7 @@ index 0000000..4537e75
 +        let bit = 1u8 << frame.index;
 +        if self.received_mask & bit != 0 {
 +            return Ok(FrameStatus::Progress {
++                frame: frame.index,
 +                received: self.received_count,
 +                total: FRAME_COUNT,
 +                duplicate: true,
@@ -776,6 +1049,7 @@ index 0000000..4537e75
 +
 +        if self.received_count != FRAME_COUNT {
 +            return Ok(FrameStatus::Progress {
++                frame: frame.index,
 +                received: self.received_count,
 +                total: FRAME_COUNT,
 +                duplicate: false,
@@ -891,7 +1165,12 @@ index 0000000..4537e75
 +            if index == FRAME_COUNT - 1 {
 +                assert_eq!(
 +                    transfer.accept_uri(&make_frame(&image, index)).unwrap(),
-+                    FrameStatus::Progress { received: 1, total: FRAME_COUNT, duplicate: true }
++                    FrameStatus::Progress {
++                        frame: index,
++                        received: 1,
++                        total: FRAME_COUNT,
++                        duplicate: true,
++                    }
 +                );
 +            }
 +            if index == 0 {
