@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#0b0e0b" />
     <meta name="description" content="Design a DEF CON 34 badge light pattern and transfer it through the badge camera." />
     <title>DC34 BadgeBloom</title>
-    <script type="module" crossorigin src="/DEFCON-34-badge-firmware/assets/index-l54sQ2gu.js"></script>
-    <link rel="stylesheet" crossorigin href="/DEFCON-34-badge-firmware/assets/index-CFRe3-9Z.css">
+    <script type="module" crossorigin src="/DEFCON-34-badge-firmware/assets/index-D99v_taG.js"></script>
+    <link rel="stylesheet" crossorigin href="/DEFCON-34-badge-firmware/assets/index-UYBfOaRv.css">
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
@@ -23,7 +23,7 @@
       <section class="hero">
         <p class="eyebrow">BADGEBLOOM / UNOFFICIAL DC34 TOOL / PROTOCOL 01</p>
         <h1>Make the badge<br /><em>move in color.</em></h1>
-        <p class="lede">Shape the native light-gene engine, then scan the generated QR with the camera on your custom-firmware DC34 badge.</p>
+        <p class="lede">Shape the native light-gene engine or turn an image into a monochrome badge wallpaper, then transfer it through the camera.</p>
       </section>
 
       <section class="workspace">
@@ -33,13 +33,12 @@
             <div class="badge-stage" aria-label="Animated approximation of the badge light pattern">
               <div class="orbit"></div>
               <div class="badge-core">
-                <span class="eye eye-left"></span>
-                <span class="eye eye-right"></span>
-                <span class="core-label">DEF<br />CON<br /><b>34</b></span>
+                <span class="core-label">DEFCON<br /><b>34</b></span>
+                <span class="human-label">HUMAN</span>
               </div>
               <div id="ledRing" class="led-ring" aria-hidden="true"></div>
             </div>
-            <p class="preview-note">Preview approximates the badge's 8 body LEDs and 2 eyes. Final brightness is hardware-limited to protect the batteries.</p>
+            <p class="preview-note">Preview follows the badge's 8-LED diamond: four corners and four side midpoints. Final brightness is hardware-limited to protect the batteries.</p>
           </div>
 
           <div class="presets" aria-label="Pattern presets">
@@ -100,7 +99,7 @@
           <div class="qr-shell"><canvas id="qrCanvas" width="280" height="280" aria-label="QR code containing the current light pattern"></canvas></div>
           <h2>Scan to apply</h2>
           <ol>
-            <li>On the custom firmware's idle screen, press the middle camera button.</li>
+            <li>On the custom firmware's idle screen, press the left camera button.</li>
             <li>Point the rear camera at this code and hold steady.</li>
             <li>Preview the result, then choose <strong>Keep</strong> or <strong>Revert</strong> on the badge.</li>
           </ol>
@@ -115,6 +114,95 @@
           </details>
           <p id="transferStatus" class="transfer-status" role="status">QR is ready.</p>
         </section>
+      </section>
+
+      <section class="wallpaper-heading" id="wallpaper">
+        <p class="eyebrow">WALLPAPER LAB / 128 × 128 / 1-BIT</p>
+        <h2>Put your mark<br /><em>on the screen.</em></h2>
+        <p>Select a local image, tune its monochrome conversion, then hold the camera on a slow, duplicate-safe eight-frame QR carousel. Files never leave this browser.</p>
+      </section>
+
+      <section class="wallpaper-workspace">
+        <section class="panel wallpaper-editor">
+          <div class="panel-kicker"><span>IMAGE CONVERTER</span><span>2,048 BYTES</span></div>
+          <div class="wallpaper-editor-body">
+            <label class="upload-field" for="wallpaperFile">
+              <span class="upload-title">Choose an image</span>
+              <span id="wallpaperFileName">PNG, JPEG, or WebP · maximum 5 MiB</span>
+              <input id="wallpaperFile" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+
+            <div class="wallpaper-preview-shell">
+              <canvas id="wallpaperPreview" width="128" height="128" aria-label="Monochrome wallpaper preview"></canvas>
+              <span id="wallpaperPlaceholder">128 × 128<br />preview</span>
+            </div>
+
+            <div class="wallpaper-controls">
+              <label>
+                <span>Framing</span>
+                <select id="wallpaperFit">
+                  <option value="cover">Crop to fill</option>
+                  <option value="contain">Fit with border</option>
+                </select>
+              </label>
+              <label>
+                <span>Conversion</span>
+                <select id="wallpaperDither">
+                  <option value="floyd-steinberg">Floyd–Steinberg</option>
+                  <option value="threshold">Hard threshold</option>
+                </select>
+              </label>
+              <label class="range-field wallpaper-threshold">
+                <span><b>Black threshold</b><output for="wallpaperThreshold">128</output></span>
+                <input id="wallpaperThreshold" type="range" min="32" max="224" value="128" />
+              </label>
+              <label class="toggle wallpaper-invert">
+                <input id="wallpaperInvert" type="checkbox" /><span></span>Invert black and white
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel wallpaper-transfer">
+          <div class="panel-kicker"><span>CAMERA-PACED TRANSFER</span><span>CRC-32</span></div>
+          <div class="wallpaper-qr-area">
+            <div class="qr-shell wallpaper-qr-shell">
+              <canvas id="wallpaperQrCanvas" width="320" height="320" aria-label="Current wallpaper transfer QR frame"></canvas>
+              <span id="wallpaperQrPlaceholder">Select an image<br />to build frames</span>
+            </div>
+            <div class="frame-meter" aria-label="Wallpaper QR frame progress">
+              <span id="frameCounter">FRAME – / 8</span>
+              <span id="frameTimer">HOLD 2.5S</span>
+            </div>
+          </div>
+
+          <div class="wallpaper-transfer-copy">
+            <h3>Slow carousel, no FPS race</h3>
+            <p>The badge collects eight independently checked frames in any order. Duplicates are ignored, and a missed frame is picked up on the next pass.</p>
+            <ol>
+              <li>Press the badge's left button and keep the camera aimed here.</li>
+              <li>Start the carousel. Each QR remains still for 2.5 seconds.</li>
+              <li>After all eight frames, preview the wallpaper and choose Keep or Discard.</li>
+            </ol>
+            <label class="range-field frame-hold-control">
+              <span><b>Frame hold</b><output for="frameHold">2.5 seconds</output></span>
+              <input id="frameHold" type="range" min="1500" max="5000" step="250" value="2500" />
+            </label>
+            <div class="button-row carousel-buttons">
+              <button id="carouselToggle" class="primary" type="button" disabled>Start carousel</button>
+              <button id="previousFrame" type="button" disabled>Previous</button>
+              <button id="nextFrame" type="button" disabled>Next</button>
+              <button id="downloadFrame" type="button" disabled>Download frame</button>
+            </div>
+            <p id="wallpaperStatus" class="transfer-status" role="status">Choose an image to begin.</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="button-map" aria-label="Custom firmware button map">
+        <span><b>LEFT</b> scan BadgeBloom QR</span>
+        <span><b>MIDDLE</b> show wallpaper</span>
+        <span><b>RIGHT</b> show source QR</span>
       </section>
     </main>
 

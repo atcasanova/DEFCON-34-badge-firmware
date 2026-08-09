@@ -1,0 +1,900 @@
+diff --git a/src/config.rs b/src/config.rs
+index 9039fcb..75bc91b 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -375,6 +375,21 @@ impl GlobalConfig {
+ 
+     pub fn gene(&self) -> Option<Diploid> { self.gene_cache }
+ 
++    pub fn force_pattern(&self, pattern: Haploid) {
++        let args = pattern.serialize_u32();
++        xous::send_message(
++            self.led_server,
++            xous::Message::new_scalar(
++                LedManagerOp::Force.to_usize().unwrap(),
++                args[0] as usize,
++                args[1] as usize,
++                args[2] as usize,
++                args[3] as usize,
++            ),
++        )
++        .ok();
++    }
++
+     pub fn render_gene(&self) {
+         if let Some(gene) = self.gene_cache {
+             gene.send(self.led_server, LedManagerOp::SetGene.to_usize().unwrap());
+diff --git a/src/lightqr.rs b/src/lightqr.rs
+new file mode 100644
+index 0000000..27c2f78
+--- /dev/null
++++ b/src/lightqr.rs
+@@ -0,0 +1,181 @@
++//! Decoder and persistence for the open, unauthenticated QR format used by DC34 Light Studio.
++//!
++//! This intentionally lives outside the encrypted conference light-exchange
++//! protocol. Custom firmware runs in developer mode, where the provisioned
++//! exchange secret has already been erased.
++
++use std::io::{Read, Write};
++
++use dc34_api::{DC34_DICT, Haploid};
++
++pub const URI_PREFIX: &str = "dc34light://";
++const STORAGE_KEY: &str = "lightstudio.gene";
++const MAGIC: [u8; 4] = *b"DC34";
++const VERSION: u8 = 1;
++const HEADER_LEN: usize = 6;
++const GENE_LEN: usize = core::mem::size_of::<Haploid>();
++const RECORD_LEN: usize = HEADER_LEN + GENE_LEN + 2;
++
++#[derive(Copy, Clone, Debug, Eq, PartialEq)]
++pub enum LightQrError {
++    NotLightQr,
++    InvalidBase45,
++    InvalidLength,
++    InvalidMagic,
++    UnsupportedVersion,
++    UnsupportedFlags,
++    ChecksumMismatch,
++    InvalidPattern,
++}
++
++impl LightQrError {
++    pub fn user_message(self) -> &'static str {
++        match self {
++            Self::NotLightQr => "Not a Light Studio QR code",
++            Self::InvalidBase45 => "Light QR has invalid Base45 data",
++            Self::InvalidLength => "Light QR has the wrong length",
++            Self::InvalidMagic => "Light QR has an invalid header",
++            Self::UnsupportedVersion => "Light QR version is not supported",
++            Self::UnsupportedFlags => "Light QR uses unsupported options",
++            Self::ChecksumMismatch => "Light QR checksum failed",
++            Self::InvalidPattern => "Light QR pattern is out of range",
++        }
++    }
++}
++
++pub fn decode_uri(uri: &str) -> Result<Haploid, LightQrError> {
++    let encoded = uri.strip_prefix(URI_PREFIX).ok_or(LightQrError::NotLightQr)?;
++    let record = base45::decode(encoded.as_bytes()).map_err(|_| LightQrError::InvalidBase45)?;
++
++    if record.len() != RECORD_LEN {
++        return Err(LightQrError::InvalidLength);
++    }
++    if record[..MAGIC.len()] != MAGIC {
++        return Err(LightQrError::InvalidMagic);
++    }
++    if record[4] != VERSION {
++        return Err(LightQrError::UnsupportedVersion);
++    }
++    if record[5] != 0 {
++        return Err(LightQrError::UnsupportedFlags);
++    }
++
++    let checksum_offset = RECORD_LEN - 2;
++    let expected = u16::from_be_bytes(record[checksum_offset..].try_into().unwrap());
++    if crc16_ccitt_false(&record[..checksum_offset]) != expected {
++        return Err(LightQrError::ChecksumMismatch);
++    }
++
++    let pattern = Haploid::deserialize(&record[HEADER_LEN..checksum_offset])
++        .ok_or(LightQrError::InvalidPattern)?;
++    validate_pattern(&pattern)?;
++    Ok(pattern)
++}
++
++pub fn load_pattern() -> Option<Haploid> {
++    let pddb = pddb::Pddb::new();
++    let mut key = pddb
++        .get(DC34_DICT, STORAGE_KEY, None, true, true, Some(GENE_LEN), None::<fn()>)
++        .ok()?;
++    let mut bytes = [0u8; GENE_LEN];
++    key.read_exact(&mut bytes).ok()?;
++    let pattern = Haploid::deserialize(&bytes)?;
++    validate_pattern(&pattern).ok()?;
++    Some(pattern)
++}
++
++pub fn save_pattern(pattern: Haploid) -> bool {
++    let pddb = pddb::Pddb::new();
++    let Ok(mut key) =
++        pddb.get(DC34_DICT, STORAGE_KEY, None, true, true, Some(GENE_LEN), None::<fn()>)
++    else {
++        return false;
++    };
++    if key.write_all(&pattern.serialize()).is_err() {
++        return false;
++    }
++    pddb.sync().is_ok()
++}
++
++fn validate_pattern(pattern: &Haploid) -> Result<(), LightQrError> {
++    let hue_direction = pattern.hue_ratedir >> 4;
++    if pattern.cd_period > 6
++        || pattern.hue_base > pattern.hue_bound
++        || !matches!(hue_direction, 0 | 15)
++        || !matches!(pattern.chaser, 0 | 255)
++        || !matches!(pattern.nonlin, 0 | 255)
++    {
++        return Err(LightQrError::InvalidPattern);
++    }
++    Ok(())
++}
++
++/// CRC-16/CCITT-FALSE: poly 0x1021, init 0xffff, no reflection, xorout 0.
++fn crc16_ccitt_false(bytes: &[u8]) -> u16 {
++    let mut crc = 0xffffu16;
++    for &byte in bytes {
++        crc ^= (byte as u16) << 8;
++        for _ in 0..8 {
++            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
++        }
++    }
++    crc
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn make_uri(pattern: Haploid) -> String {
++        let mut record = Vec::from(MAGIC);
++        record.push(VERSION);
++        record.push(0);
++        record.extend_from_slice(&pattern.serialize());
++        record.extend_from_slice(&crc16_ccitt_false(&record).to_be_bytes());
++        format!("{}{}", URI_PREFIX, base45::encode(&record))
++    }
++
++    #[test]
++    fn decodes_a_canonical_pattern() {
++        let pattern = Haploid {
++            cd_period: 3,
++            cd_rate: 160,
++            cd_dir: 255,
++            sat: 220,
++            hue_ratedir: 0xf5,
++            hue_base: 12,
++            hue_bound: 180,
++            chaser: 255,
++            nonlin: 255,
++        };
++        assert_eq!(decode_uri(&make_uri(pattern)).unwrap().serialize(), pattern.serialize());
++    }
++
++    #[test]
++    fn rejects_corruption() {
++        let pattern = Haploid {
++            cd_period: 2,
++            hue_bound: 1,
++            chaser: 255,
++            nonlin: 255,
++            ..Default::default()
++        };
++        let mut uri = make_uri(pattern);
++        uri.push('0');
++        assert!(matches!(decode_uri(&uri), Err(LightQrError::InvalidLength)));
++    }
++
++    #[test]
++    fn matches_the_web_encoder_vector() {
++        let pattern = decode_uri("dc34light://FS8DL6V50SK0PFWZ/U%DG EW+3").unwrap();
++        assert_eq!(
++            pattern.serialize(),
++            vec![0x03, 0xa0, 0xff, 0xdc, 0xf5, 0x00, 0x80, 0xff, 0xff]
++        );
++    }
++
++    #[test]
++    fn ignores_unrelated_qr_codes() {
++        assert_eq!(decode_uri("otpauth://totp/example"), Err(LightQrError::NotLightQr));
++    }
++}
+diff --git a/src/main.rs b/src/main.rs
+index 553647e..cd01a47 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -20,8 +20,10 @@ mod fido2;
+ mod genemenu;
+ mod generator;
+ mod idlemenu;
++mod lightqr;
+ mod tests;
+ mod vendor_commands;
++mod wallpaper;
+ 
+ use core::sync::atomic::{AtomicBool, Ordering};
+ use std::io::Read;
+@@ -57,10 +59,13 @@ pub enum VaultMode {
+     Idle,
+     IdleDevMode,
+     ShowKey { quantum: u32 },
++    ShowRepo { quantum: u32 },
+     ResponseGene { quantum: u32 },
+     // state for confirming the current pattern
+     ConfirmGene,
++    ConfirmWallpaper,
+     GeneScan,
++    Wallpaper,
+     FactoryTest,
+     StandAloneTest,
+     Tour,
+@@ -77,6 +82,7 @@ impl VaultMode {
+         match self {
+             VaultMode::About => true,
+             VaultMode::ConfirmGene => false,
++            VaultMode::ConfirmWallpaper => false,
+             VaultMode::FactoryTest => true,
+             VaultMode::StandAloneTest => true,
+             VaultMode::DefconHelp => true,
+@@ -86,8 +92,10 @@ impl VaultMode {
+             VaultMode::Password => false,
+             VaultMode::Totp => true,
+             VaultMode::GeneScan => true,
++            VaultMode::Wallpaper => false,
+             VaultMode::ResponseGene { quantum: _ } => true,
+             VaultMode::ShowKey { quantum: _ } => true,
++            VaultMode::ShowRepo { quantum: _ } => true,
+             VaultMode::TokenTour => false,
+             VaultMode::Tour => false,
+         }
+@@ -190,6 +198,10 @@ fn main() -> ! {
+     let global_config = Arc::new(Mutex::new(global_config));
+     *mode.lock().unwrap() = init_mode;
+     vault_ui.set_global_config(global_config.clone());
++    if let Some(pattern) = lightqr::load_pattern() {
++        log::info!("Restoring saved Light Studio pattern: {:?}", pattern);
++        global_config.lock().unwrap().force_pattern(pattern);
++    }
+ 
+     log::info!("Fido2 service");
+     fido2::fido2_handler(conn, allow_host.clone(), opensk_mutex.clone(), animate.clone());
+@@ -302,6 +314,10 @@ fn main() -> ! {
+     let mut mutation_param: u8 = 0;
+     let mut k_last = '\u{0000}';
+     let mut skip_one_key = false;
++    let mut pending_light_pattern: Option<Haploid> = None;
++    let mut image_transfer = wallpaper::ImageTransfer::new();
++    let mut pending_wallpaper: Option<[u32; wallpaper::BITMAP_WORDS]> = None;
++    let mut previous_wallpaper: Option<[u32; wallpaper::BITMAP_WORDS]> = None;
+     loop {
+         global_config.lock().unwrap().update_power_state(mode.lock().unwrap().clone());
+         let msg = xous::receive_message(sid).unwrap();
+@@ -377,7 +393,7 @@ fn main() -> ! {
+                 if menu_active {
+                     if matches!(mode_now, VaultMode::Tour) {
+                         tour_menu_mgr.key_press(k);
+-                    } else if matches!(mode_now, VaultMode::ConfirmGene) {
++                    } else if matches!(mode_now, VaultMode::ConfirmGene | VaultMode::ConfirmWallpaper) {
+                         gene_menu_mgr.key_press(k);
+                     } else if matches!(mode_now, VaultMode::Idle)
+                         || matches!(mode_now, VaultMode::IdleDevMode)
+@@ -396,7 +412,7 @@ fn main() -> ! {
+                             animate.store(false, Ordering::SeqCst);
+                             if matches!(mode_now, VaultMode::Tour) {
+                                 tour_menu_mgr.redraw();
+-                            } else if matches!(mode_now, VaultMode::ConfirmGene) {
++                            } else if matches!(mode_now, VaultMode::ConfirmGene | VaultMode::ConfirmWallpaper) {
+                                 gene_menu_mgr.redraw();
+                             } else if matches!(mode_now, VaultMode::Idle)
+                                 || matches!(mode_now, VaultMode::IdleDevMode)
+@@ -593,7 +609,12 @@ fn main() -> ! {
+                 .ok();
+             }
+             Some(VaultOp::AbortQr) => {
+-                if global_config.lock().unwrap().is_badge_attached() {
++                image_transfer.reset();
++                if global_config.lock().unwrap().is_developer() {
++                    *mode.lock().unwrap() = VaultMode::IdleDevMode;
++                    animate.store(VaultMode::IdleDevMode.should_animate(), Ordering::SeqCst);
++                    vault_ui.redraw();
++                } else if global_config.lock().unwrap().is_badge_attached() {
+                     *mode.lock().unwrap() = VaultMode::Idle;
+                     animate.store(VaultMode::Idle.should_animate(), Ordering::SeqCst);
+                     vault_ui.redraw();
+@@ -614,6 +635,110 @@ fn main() -> ! {
+                 log::info!("mode: {:?}, s: {}", mode_now, s.s);
+                 skip_one_key = false;
+ 
++                match image_transfer.accept_uri(&s.s) {
++                    Ok(wallpaper::FrameStatus::Progress { received, total, duplicate }) => {
++                        log::info!("Wallpaper transfer progress: {}/{} duplicate={}", received, total, duplicate);
++                        *mode.lock().unwrap() = VaultMode::GeneScan;
++                        animate.store(false, Ordering::SeqCst);
++                        vault_ui.image_scan_progress(received, total, duplicate);
++                        tt.sleep_ms(400).ok();
++                        vault_ui.camera_transition();
++                        xous::send_message(
++                            actions_conn,
++                            xous::Message::new_blocking_scalar(
++                                ActionOp::AcquireQr.to_usize().unwrap(),
++                                0,
++                                0,
++                                0,
++                                0,
++                            ),
++                        )
++                        .ok();
++                        continue;
++                    }
++                    Ok(wallpaper::FrameStatus::Complete(bitmap)) => {
++                        log::info!("Wallpaper transfer complete; presenting preview");
++                        previous_wallpaper = vault_ui.user_bitmap;
++                        vault_ui.user_bitmap = Some(bitmap);
++                        pending_wallpaper = Some(bitmap);
++                        *mode.lock().unwrap() = VaultMode::ConfirmWallpaper;
++                        animate.store(false, Ordering::SeqCst);
++
++                        // Reuse the stock Keep/Revert menu as the persistence boundary.
++                        std::thread::spawn(move || {
++                            std::thread::sleep(std::time::Duration::from_millis(500));
++                            xous::send_message(
++                                conn,
++                                xous::Message::new_scalar(
++                                    VaultOp::KeyPress.to_usize().unwrap(),
++                                    0x2234usize,
++                                    0,
++                                    0,
++                                    0,
++                                ),
++                            )
++                            .ok();
++                        });
++                        continue;
++                    }
++                    Err(wallpaper::WallpaperQrError::NotWallpaperQr) => (),
++                    Err(e) => {
++                        log::warn!("Invalid BadgeBloom wallpaper QR: {:?}", e);
++                        image_transfer.reset();
++                        animate.store(false, Ordering::SeqCst);
++                        modals.show_notification(e.user_message(), None).ok();
++                        *mode.lock().unwrap() = VaultMode::IdleDevMode;
++                        animate.store(mode.lock().unwrap().should_animate(), Ordering::SeqCst);
++                        vault_ui.redraw();
++                        continue;
++                    }
++                }
++
++                // DC34 Light Studio uses an open, checksummed QR format. This is deliberately
++                // separate from the encrypted conference exchange protocol: loading this firmware
++                // puts the device into developer mode and erases the provisioned exchange key.
++                match lightqr::decode_uri(&s.s) {
++                    Ok(pattern) => {
++                        log::info!("Applying Light Studio pattern: {:?}", pattern);
++                        global_config.lock().unwrap().force_pattern(pattern);
++                        pending_light_pattern = Some(pattern);
++                        *mode.lock().unwrap() = VaultMode::ConfirmGene;
++                        animate.store(false, Ordering::SeqCst);
++
++                        // Reuse the stock Keep/Revert flow, so a scan is previewed before it is
++                        // persisted to PDDB.
++                        std::thread::spawn(move || {
++                            std::thread::sleep(std::time::Duration::from_millis(500));
++                            xous::send_message(
++                                conn,
++                                xous::Message::new_scalar(
++                                    VaultOp::KeyPress.to_usize().unwrap(),
++                                    0x2234usize,
++                                    0,
++                                    0,
++                                    0,
++                                ),
++                            )
++                            .ok();
++                        });
++                        continue;
++                    }
++                    Err(lightqr::LightQrError::NotLightQr) => (),
++                    Err(e) => {
++                        log::warn!("Invalid Light Studio QR: {:?}", e);
++                        animate.store(false, Ordering::SeqCst);
++                        modals.show_notification(e.user_message(), None).ok();
++                        *mode.lock().unwrap() = if global_config.lock().unwrap().is_developer() {
++                            VaultMode::IdleDevMode
++                        } else {
++                            VaultMode::Idle
++                        };
++                        animate.store(mode.lock().unwrap().should_animate(), Ordering::SeqCst);
++                        vault_ui.redraw();
++                        continue;
++                    }
++                }
++
+                 match mode_now {
+                     VaultMode::GeneScan
+                     | VaultMode::ResponseGene { quantum: _ }
+@@ -929,15 +1054,50 @@ fn main() -> ! {
+                 vault_ui.redraw();
+             }
+             Some(VaultOp::KeepGene) => {
+-                if let Some(gene) = global_config.lock().unwrap().gene() {
+-                    save_light_gene(gene);
++                if let Some(bitmap) = pending_wallpaper {
++                    if wallpaper::save_wallpaper(&bitmap) {
++                        pending_wallpaper = None;
++                        previous_wallpaper = None;
++                        *mode.lock().unwrap() = VaultMode::IdleDevMode;
++                    } else {
++                        log::error!("Failed to persist BadgeBloom wallpaper");
++                        modals.show_notification("Failed to save wallpaper", None).ok();
++                        *mode.lock().unwrap() = VaultMode::ConfirmWallpaper;
++                    }
++                } else if let Some(pattern) = pending_light_pattern {
++                    if lightqr::save_pattern(pattern) {
++                        pending_light_pattern = None;
++                        *mode.lock().unwrap() = VaultMode::IdleDevMode;
++                    } else {
++                        log::error!("Failed to persist Light Studio pattern");
++                        modals.show_notification("Failed to save light pattern", None).ok();
++                        *mode.lock().unwrap() = VaultMode::ConfirmGene;
++                    }
++                } else {
++                    if let Some(gene) = global_config.lock().unwrap().gene() {
++                        save_light_gene(gene);
++                    }
++                    *mode.lock().unwrap() = VaultMode::Idle;
+                 }
+-                *mode.lock().unwrap() = VaultMode::Idle;
+             }
+             Some(VaultOp::RevertGene) => {
+-                global_config.lock().unwrap().revert_gene();
+-                global_config.lock().unwrap().render_gene();
+-                *mode.lock().unwrap() = VaultMode::Idle;
++                if pending_wallpaper.take().is_some() {
++                    vault_ui.user_bitmap = previous_wallpaper.take();
++                } else if pending_light_pattern.take().is_some() {
++                    if let Some(pattern) = lightqr::load_pattern() {
++                        global_config.lock().unwrap().force_pattern(pattern);
++                    } else {
++                        global_config.lock().unwrap().render_gene();
++                    }
++                } else {
++                    global_config.lock().unwrap().revert_gene();
++                    global_config.lock().unwrap().render_gene();
++                }
++                *mode.lock().unwrap() = if global_config.lock().unwrap().is_developer() {
++                    VaultMode::IdleDevMode
++                } else {
++                    VaultMode::Idle
++                };
+             }
+             Some(VaultOp::TokenMode) => {
+                 *mode.lock().unwrap() = VaultMode::Password;
+diff --git a/src/ux.rs b/src/ux.rs
+index f2746d1..5f9b25a 100644
+--- a/src/ux.rs
++++ b/src/ux.rs
+@@ -17,6 +17,7 @@ use crate::action_handler::SelectedEntry;
+ use crate::config::AttachState;
+ use crate::*;
+ 
++const BADGEBLOOM_REPOSITORY: &str = "https://github.com/atcasanova/DEFCON-34-badge-firmware";
+ const FAST_SCROLL_DELAY_MS: u64 = 1300;
+ const KEYUP_DELAY_MS: u64 = 100;
+ /// How many elements to skip through on fast scroll
+@@ -917,7 +918,17 @@ impl VaultUi {
+                     _ => {}
+                 }
+             }
+-            VaultMode::ShowKey { quantum } | VaultMode::ResponseGene { quantum } => {
++            VaultMode::Wallpaper | VaultMode::ConfirmWallpaper => {
++                self.clear_area();
++                if let Some(bitmap) = self.user_bitmap.as_ref() {
++                    self.gfx.bitmap_diffusion(bitmap, None, None).ok();
++                } else {
++                    self.gfx.bitmap(&bitmaps::dc_logo::BITMAP, None, None).ok();
++                }
++            }
++            VaultMode::ShowKey { quantum }
++            | VaultMode::ShowRepo { quantum }
++            | VaultMode::ResponseGene { quantum } => {
+                 if let Some(code) = &self.qr_override {
+                     if quantum & 7 == 0 {
+                         self.clear_area();
+@@ -927,7 +938,11 @@ impl VaultUi {
+                         self.gfx.render_qr(&modules, width, Point::new(0, 0)).ok();
+                     }
+                     if quantum & 7 == 6 {
+-                        let width = if matches!(mode_at_entry, VaultMode::ShowKey { .. }) { 14 } else { 17 };
++                        let (width, label) = match mode_at_entry {
++                            VaultMode::ShowKey { .. } => (14, "NCE"),
++                            VaultMode::ShowRepo { .. } => (17, "SRC"),
++                            _ => (17, "DAT"),
++                        };
+                         let mut tv = TextView::new(
+                             Gid::dummy(),
+                             TextBounds::CenteredTop(Rectangle::new(
+@@ -939,21 +954,30 @@ impl VaultUi {
+                         tv.margin = Point::new(3, -2);
+                         tv.style = GlyphStyle::Bold;
+                         tv.draw_border = false;
+-                        if matches!(mode_at_entry, VaultMode::ShowKey { .. }) {
+-                            write!(tv, "NCE").ok();
+-                        } else {
+-                            write!(tv, "DAT").ok();
+-                        }
++                        write!(tv, "{}", label).ok();
+                         self.gfx.draw_textview(&mut tv).ok();
+                     }
+                     if matches!(mode_at_entry, VaultMode::ShowKey { .. }) {
+                         *self.mode.lock().unwrap() = VaultMode::ShowKey { quantum: quantum + 1 }
++                    } else if matches!(mode_at_entry, VaultMode::ShowRepo { .. }) {
++                        *self.mode.lock().unwrap() = VaultMode::ShowRepo { quantum: quantum + 1 }
+                     } else if matches!(mode_at_entry, VaultMode::ResponseGene { .. }) {
+                         *self.mode.lock().unwrap() = VaultMode::ResponseGene { quantum: quantum + 1 }
+                     }
+                 } else {
+                     // if no code, go back to idle mode
+-                    *self.mode.lock().unwrap() = VaultMode::Idle;
++                    *self.mode.lock().unwrap() = if self
++                        .global_config
++                        .as_ref()
++                        .unwrap()
++                        .lock()
++                        .unwrap()
++                        .is_developer()
++                    {
++                        VaultMode::IdleDevMode
++                    } else {
++                        VaultMode::Idle
++                    };
+                 }
+             }
+             VaultMode::GeneScan => {
+@@ -1685,7 +1709,41 @@ impl VaultUi {
+                 }
+                 _ => Some(k),
+             },
+-            VaultMode::IdleDevMode => Some(k),
++            VaultMode::IdleDevMode => match k {
++                '←' => {
++                    *self.mode.lock().unwrap() = VaultMode::GeneScan;
++                    // The top-level camera path is keyed on the fire symbol. Remap only in
++                    // developer idle mode; factory tests, menus, and update mode are untouched.
++                    Some('🔥')
++                }
++                '🔥' => {
++                    *self.mode.lock().unwrap() = VaultMode::Wallpaper;
++                    None
++                }
++                '→' => {
++                    match QrCode::with_error_correction_level(
++                        BADGEBLOOM_REPOSITORY.as_bytes(),
++                        qrcode::EcLevel::M,
++                    ) {
++                        Ok(code) => {
++                            self.qr_override = Some(code);
++                            *self.mode.lock().unwrap() = VaultMode::ShowRepo { quantum: 0 };
++                        }
++                        Err(e) => log::error!("Couldn't render BadgeBloom repository QR: {:?}", e),
++                    }
++                    None
++                }
++                _ => Some(k),
++            },
++            VaultMode::Wallpaper => {
++                *self.mode.lock().unwrap() = VaultMode::IdleDevMode;
++                None
++            }
++            VaultMode::ShowRepo { quantum: _ } => {
++                self.qr_override.take();
++                *self.mode.lock().unwrap() = VaultMode::IdleDevMode;
++                None
++            }
+             VaultMode::ShowKey { quantum: _ } => {
+                 match k {
+                     '🔥' => {
+@@ -1701,7 +1759,7 @@ impl VaultUi {
+                 }
+             }
+             // this is the next state of the recipient after showing the key
+-            VaultMode::ConfirmGene => Some(k),
++            VaultMode::ConfirmGene | VaultMode::ConfirmWallpaper => Some(k),
+             // this is the state of the donor in response to query
+             VaultMode::ResponseGene { quantum: _ } => {
+                 self.global_config.as_mut().unwrap().lock().unwrap().clear_nonces();
+@@ -1736,6 +1794,25 @@ impl VaultUi {
+         self.redraw();
+     }
+ 
++    pub(crate) fn image_scan_progress(&mut self, received: usize, total: usize, duplicate: bool) {
++        self.gfx.clear().ok();
++        let mut tv = TextView::new(
++            Gid::dummy(),
++            TextBounds::CenteredTop(Rectangle::new(Point::new(0, 42), Point::new(127, 104))),
++        );
++        tv.invert = true;
++        tv.margin = Point::new(2, 2);
++        tv.style = GlyphStyle::Bold;
++        tv.draw_border = false;
++        if duplicate {
++            write!(tv, "Already have frame\n{} / {}", received, total).ok();
++        } else {
++            write!(tv, "Wallpaper frame\n{} / {}", received, total).ok();
++        }
++        self.gfx.draw_textview(&mut tv).ok();
++        self.gfx.flush().ok();
++    }
++
+     pub(crate) fn filter(&mut self, criteria: &String) {
+         self.filter = criteria.to_owned();
+         // only filter passwords in this implementation
+diff --git a/src/wallpaper.rs b/src/wallpaper.rs
+new file mode 100644
+index 0000000..4537e75
+--- /dev/null
++++ b/src/wallpaper.rs
+@@ -0,0 +1,252 @@
++//! Camera-paced QR wallpaper transfer and PDDB persistence.
++//!
++//! The browser emits eight independently checksummed 256-byte frames. Frames
++//! may arrive out of order or more than once; PDDB is written only after the
++//! complete 2,048-byte image passes its whole-image CRC-32.
++
++use std::io::Write;
++
++use dc34_api::{DC34_DICT, DC34_IMAGE};
++
++pub const URI_PREFIX: &str = "dc34image://";
++pub const IMAGE_BYTES: usize = 2048;
++pub const FRAME_BYTES: usize = 256;
++pub const FRAME_COUNT: usize = IMAGE_BYTES / FRAME_BYTES;
++pub const BITMAP_WORDS: usize = IMAGE_BYTES / core::mem::size_of::<u32>();
++
++const MAGIC: [u8; 4] = *b"D34I";
++const VERSION: u8 = 1;
++const FLAGS: u8 = 0;
++const HEADER_BYTES: usize = 14;
++const FRAME_CRC_BYTES: usize = 4;
++const RECORD_BYTES: usize = HEADER_BYTES + FRAME_BYTES + FRAME_CRC_BYTES;
++
++#[derive(Copy, Clone, Debug, Eq, PartialEq)]
++pub enum WallpaperQrError {
++    NotWallpaperQr,
++    InvalidBase45,
++    InvalidLength,
++    InvalidMagic,
++    UnsupportedVersion,
++    UnsupportedFlags,
++    InvalidFrame,
++    FrameChecksumMismatch,
++    ImageChecksumMismatch,
++}
++
++impl WallpaperQrError {
++    pub fn user_message(self) -> &'static str {
++        match self {
++            Self::NotWallpaperQr => "Not a BadgeBloom wallpaper QR",
++            Self::InvalidBase45 => "Wallpaper QR has invalid Base45 data",
++            Self::InvalidLength => "Wallpaper QR has the wrong length",
++            Self::InvalidMagic => "Wallpaper QR has an invalid header",
++            Self::UnsupportedVersion => "Wallpaper QR version is not supported",
++            Self::UnsupportedFlags => "Wallpaper QR uses unsupported options",
++            Self::InvalidFrame => "Wallpaper QR has invalid frame metadata",
++            Self::FrameChecksumMismatch => "Wallpaper frame checksum failed",
++            Self::ImageChecksumMismatch => "Complete wallpaper checksum failed",
++        }
++    }
++}
++
++#[derive(Clone, Debug)]
++struct ImageFrame {
++    transfer_id: u32,
++    index: usize,
++    payload: [u8; FRAME_BYTES],
++}
++
++#[derive(Copy, Clone, Debug, Eq, PartialEq)]
++pub enum FrameStatus {
++    Progress { received: usize, total: usize, duplicate: bool },
++    Complete([u32; BITMAP_WORDS]),
++}
++
++pub struct ImageTransfer {
++    transfer_id: Option<u32>,
++    received_mask: u8,
++    received_count: usize,
++    bytes: [u8; IMAGE_BYTES],
++}
++
++impl ImageTransfer {
++    pub fn new() -> Self {
++        Self { transfer_id: None, received_mask: 0, received_count: 0, bytes: [0u8; IMAGE_BYTES] }
++    }
++
++    pub fn reset(&mut self) {
++        self.transfer_id = None;
++        self.received_mask = 0;
++        self.received_count = 0;
++        self.bytes.fill(0);
++    }
++
++    pub fn accept_uri(&mut self, uri: &str) -> Result<FrameStatus, WallpaperQrError> {
++        let frame = decode_frame(uri)?;
++        if self.transfer_id != Some(frame.transfer_id) {
++            self.reset();
++            self.transfer_id = Some(frame.transfer_id);
++        }
++
++        let bit = 1u8 << frame.index;
++        if self.received_mask & bit != 0 {
++            return Ok(FrameStatus::Progress {
++                received: self.received_count,
++                total: FRAME_COUNT,
++                duplicate: true,
++            });
++        }
++
++        let offset = frame.index * FRAME_BYTES;
++        self.bytes[offset..offset + FRAME_BYTES].copy_from_slice(&frame.payload);
++        self.received_mask |= bit;
++        self.received_count += 1;
++
++        if self.received_count != FRAME_COUNT {
++            return Ok(FrameStatus::Progress {
++                received: self.received_count,
++                total: FRAME_COUNT,
++                duplicate: false,
++            });
++        }
++
++        let transfer_id = self.transfer_id.unwrap();
++        if crc32(&self.bytes) != transfer_id {
++            self.reset();
++            return Err(WallpaperQrError::ImageChecksumMismatch);
++        }
++
++        let mut bitmap = [0u32; BITMAP_WORDS];
++        for (word, chunk) in bitmap.iter_mut().zip(self.bytes.chunks_exact(4)) {
++            *word = u32::from_be_bytes(chunk.try_into().unwrap());
++        }
++        self.reset();
++        Ok(FrameStatus::Complete(bitmap))
++    }
++}
++
++pub fn save_wallpaper(bitmap: &[u32; BITMAP_WORDS]) -> bool {
++    let pddb = pddb::Pddb::new();
++    let Ok(mut key) = pddb.get(DC34_DICT, DC34_IMAGE, None, true, true, Some(IMAGE_BYTES), None::<fn()>)
++    else {
++        return false;
++    };
++    if key.write_all(bytemuck::cast_slice(bitmap)).is_err() {
++        return false;
++    }
++    pddb.sync().is_ok()
++}
++
++fn decode_frame(uri: &str) -> Result<ImageFrame, WallpaperQrError> {
++    let encoded = uri.strip_prefix(URI_PREFIX).ok_or(WallpaperQrError::NotWallpaperQr)?;
++    let record = base45::decode(encoded.as_bytes()).map_err(|_| WallpaperQrError::InvalidBase45)?;
++    if record.len() != RECORD_BYTES {
++        return Err(WallpaperQrError::InvalidLength);
++    }
++    if record[..MAGIC.len()] != MAGIC {
++        return Err(WallpaperQrError::InvalidMagic);
++    }
++    if record[4] != VERSION {
++        return Err(WallpaperQrError::UnsupportedVersion);
++    }
++    if record[5] != FLAGS {
++        return Err(WallpaperQrError::UnsupportedFlags);
++    }
++
++    let transfer_id = u32::from_be_bytes(record[6..10].try_into().unwrap());
++    let index = record[10] as usize;
++    let frame_count = record[11] as usize;
++    let payload_len = u16::from_be_bytes(record[12..14].try_into().unwrap()) as usize;
++    if index >= FRAME_COUNT || frame_count != FRAME_COUNT || payload_len != FRAME_BYTES {
++        return Err(WallpaperQrError::InvalidFrame);
++    }
++
++    let crc_offset = record.len() - FRAME_CRC_BYTES;
++    let expected = u32::from_be_bytes(record[crc_offset..].try_into().unwrap());
++    if crc32(&record[..crc_offset]) != expected {
++        return Err(WallpaperQrError::FrameChecksumMismatch);
++    }
++    let mut payload = [0u8; FRAME_BYTES];
++    payload.copy_from_slice(&record[HEADER_BYTES..crc_offset]);
++    Ok(ImageFrame { transfer_id, index, payload })
++}
++
++/// CRC-32/ISO-HDLC: poly 0xedb88320, init/xorout 0xffffffff, reflected.
++fn crc32(bytes: &[u8]) -> u32 {
++    let mut crc = 0xffff_ffffu32;
++    for &byte in bytes {
++        crc ^= byte as u32;
++        for _ in 0..8 {
++            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 };
++        }
++    }
++    crc ^ 0xffff_ffff
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn make_frame(image: &[u8; IMAGE_BYTES], index: usize) -> String {
++        let transfer_id = crc32(image);
++        let mut body = Vec::from(MAGIC);
++        body.push(VERSION);
++        body.push(FLAGS);
++        body.extend_from_slice(&transfer_id.to_be_bytes());
++        body.push(index as u8);
++        body.push(FRAME_COUNT as u8);
++        body.extend_from_slice(&(FRAME_BYTES as u16).to_be_bytes());
++        body.extend_from_slice(&image[index * FRAME_BYTES..(index + 1) * FRAME_BYTES]);
++        let frame_crc = crc32(&body);
++        body.extend_from_slice(&frame_crc.to_be_bytes());
++        format!("{}{}", URI_PREFIX, base45::encode(&body))
++    }
++
++    #[test]
++    fn crc_matches_the_standard_vector() {
++        assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
++    }
++
++    #[test]
++    fn accepts_frames_out_of_order_and_ignores_duplicates() {
++        let mut image = [0u8; IMAGE_BYTES];
++        for (index, byte) in image.iter_mut().enumerate() {
++            *byte = (index.wrapping_mul(73).wrapping_add(19) & 0xff) as u8;
++        }
++        let mut transfer = ImageTransfer::new();
++        for index in (0..FRAME_COUNT).rev() {
++            let status = transfer.accept_uri(&make_frame(&image, index)).unwrap();
++            if index == FRAME_COUNT - 1 {
++                assert_eq!(
++                    transfer.accept_uri(&make_frame(&image, index)).unwrap(),
++                    FrameStatus::Progress { received: 1, total: FRAME_COUNT, duplicate: true }
++                );
++            }
++            if index == 0 {
++                let FrameStatus::Complete(bitmap) = status else { panic!("expected complete image") };
++                assert_eq!(bitmap[0], u32::from_be_bytes(image[..4].try_into().unwrap()));
++                assert_eq!(bitmap[BITMAP_WORDS - 1], u32::from_be_bytes(image[IMAGE_BYTES - 4..].try_into().unwrap()));
++            }
++        }
++    }
++
++    #[test]
++    fn matches_the_web_zero_image_vector() {
++        let image = [0u8; IMAGE_BYTES];
++        let frame = decode_frame("dc34image://:R8KR6V508QUTQN800V50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000QCWH5E").unwrap();
++        assert_eq!(frame.transfer_id, crc32(&image));
++        assert_eq!(frame.index, 0);
++        assert_eq!(frame.payload, [0u8; FRAME_BYTES]);
++    }
++
++    #[test]
++    fn rejects_corrupted_frames() {
++        let image = [0u8; IMAGE_BYTES];
++        let mut uri = make_frame(&image, 0).into_bytes();
++        let payload_character = URI_PREFIX.len() + 120;
++        uri[payload_character] = if uri[payload_character] == b'0' { b'1' } else { b'0' };
++        let corrupted = String::from_utf8(uri).unwrap();
++        assert_eq!(decode_frame(&corrupted).unwrap_err(), WallpaperQrError::FrameChecksumMismatch);
++    }
++}
